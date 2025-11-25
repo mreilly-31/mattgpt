@@ -1,5 +1,6 @@
-import { Value } from "./structures";
-
+import { NDimTensor, Value } from "./structures";
+import { TensorView, _tensor } from "./structures/OldTensor";
+import { Tensor } from "./structures/Tensor";
 export function weightedRandomSample(
   probabilities: number[],
   numSamples: number
@@ -61,4 +62,26 @@ export const loss = (predictions: Value[], targets: Value[]) => {
   return result.reduce((acc: Value, cur: Value) => {
     return acc.add(cur)
   }, new Value(0));
+}
+
+export const one_hot = (inputTensor: TensorView<[1], number>, num_classes: number): number[][] => {
+  let result: number[][] = [];
+  const tensorxByDim = inputTensor.length;
+  for (let i = 0; i < tensorxByDim; i++ ) {
+    const oneHotRow = new Array(num_classes).fill(0);
+    oneHotRow[inputTensor[i]] = 1;
+    result.push(oneHotRow);
+  }
+
+  function* fillArr() {
+    let index = 0;
+    let subIndex = 0;
+    while (index < result.length && subIndex < result[index].length) {
+      yield result[index++][subIndex++];
+    }
+  }
+
+  const t = _tensor([result.length, result[0].length] as const, fillArr());
+
+  return t;
 }

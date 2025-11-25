@@ -20,6 +20,10 @@ export class Value {
     this._backward = () => {};
   }
 
+  static v(val: number): Value {
+    return new Value(val);
+  }
+
   print() {
     return `${this.label}: Data: ${this.data}, Grad: ${this.grad}`;
   }
@@ -111,4 +115,8 @@ export class Value {
       node._backward();
     }
   }
+}
+
+export function v(val: number): Value {
+  return Value.v(val);
 }
