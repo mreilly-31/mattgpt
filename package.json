@@ -1,0 +1,18 @@
+{
+  "dependencies": {
+    "ts-graphviz": "^3.0.6",
+    "tsx": "^4.20.6"
+  },
+  "name": "mattgpt",
+  "version": "1.0.0",
+  "description": "ts implementation of andrejs ai course",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "matt.reilly@playbookexp.com",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.10.1"
+  }
+}
