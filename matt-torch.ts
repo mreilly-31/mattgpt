@@ -96,6 +96,8 @@ export const multiply = (a: Tensor, b: Tensor): Tensor => {
   for (let i = 0; i < a.dims[0]; i++) {
     for (let j = 0; j < b.dims[1]; j++) {
       for (let k = 0; k < a.dims[1]; k++) {
+        // TODO: might need to use the value multiply function
+        // figure that out
         const currentProduct = result.at([i, j]).data;
         const additionalProduct = a.at([i, k]).data * b.at([k, j]).data;
         result.set([i, j], currentProduct + additionalProduct);
