@@ -59,7 +59,7 @@ for (let iter = 0; iter < 20; iter++) {
   let builtStr: string[] = [];
   while (true) {
     const contextIdx = k_to_idx(context);
-    const normalizedP = normalizedTensor.row([contextIdx]).map(item => item.data);
+    const normalizedP = normalizedTensor.vrow([contextIdx]).map(item => item.data);
     const nextIndex = weightedRandomSample(normalizedP, 1)[0];
     const nextChar = itos(nextIndex);
     if (nextChar === SPECIAL) {

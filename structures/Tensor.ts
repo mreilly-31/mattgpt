@@ -5,6 +5,14 @@ type ValueInitializer = number | Value | ((coords: number[]) => number | Value);
 
 const isValue = (candidate: unknown): candidate is Value =>
   candidate instanceof Value;
+
+type Slice = {
+  start?: number;
+  end?: number;
+  step?: number;
+};
+
+
 /**
  * My tensor implementation, following some pytorch naming etc but mostly just winging it
  * uses the Value class as the base data type
@@ -14,7 +22,7 @@ const isValue = (candidate: unknown): candidate is Value =>
 export class Tensor {
   readonly dims: IndexTuple;
   private readonly strides: number[];
-  private readonly data: Value[];
+  private data: Value[];
   readonly size: number;
 
   constructor(dims: IndexTuple, fill: ValueInitializer = 0) {
@@ -72,12 +80,13 @@ export class Tensor {
     return this.dims as number[];
   }
 
-  show(): void {
+  show(use_grad?: boolean): void {
+    const is_grad = use_grad ?? false;
     const chunks: string[] = [];
     const visit = (prefix: number[], depth: number) => {
       if (depth === this.dims.length - 1) {
-        const rowValues = this.row(prefix)
-          .map((value) => value.data.toFixed(4))
+        const rowValues = this.vrow(prefix)
+          .map((value) => is_grad ? value.grad : value.data)
           .join(", ");
         chunks.push(
           prefix.length ? " ".repeat(prefix.length) : "",
@@ -95,7 +104,22 @@ export class Tensor {
     };
 
     visit([], 0);
-    console.log(`Tensor of shape ${this.shape()}:\n${chunks.join("\n")}`);
+    console.log(`Tensor of shape ${this.shape()} (${is_grad ? 'Grad' : 'Data'}):\n${chunks.join("\n")}`);
+  }
+
+  show_grad(): void {
+    this.show(true);
+  }
+
+  /**
+   * Return the sum of all values in the tensor
+   * 
+   * @param start optional start value for the summation
+   * @returns the sum of all values in the tensor.
+   */
+  sum(start?: number): Value {
+    const sumStart = start ?? 0;
+    return this.data.reduce((acc, cur) => acc.add(cur), new Value(sumStart));
   }
 
   /**
@@ -110,12 +134,17 @@ export class Tensor {
   }
 
   /**
-   * Return a whole row at the given location.
-   *
-   * @param indices
-   * @returns the row in the tensor at the given indices
+   * Perform a backward pass on the tensor
    */
-  row(indices: number[]): Value[] {
+  backward() {
+    this.data.forEach(item => item.backward());
+  }
+
+  /**
+   * Return the row values as raw Value instances.
+   * Deprecated: prefer row() which returns a Tensor view.
+   */
+  vrow(indices: number[]): Value[] {
     if (indices.length !== this.dims.length - 1) {
       throw new Error("Not a last axis row, can't get");
     }
@@ -124,6 +153,29 @@ export class Tensor {
       flatIndex,
       flatIndex + this.dims[this.dims.length - 1]
     );
+  }
+
+  /**
+   * Return a whole row at the given location as a Tensor.
+   */
+  row(indices: number[]): Tensor {
+    const values = this.vrow(indices);
+    const result = new Tensor([values.length], 0);
+    values.forEach((value, idx) => {
+      result.set([idx], value);
+    });
+    return result;
+  }
+
+  /**
+   * Zero out the grads of each value in the tensor.
+   * 
+   * Mutates the tensor in-place.
+   */
+  zero_grad(): void {
+    this.data.forEach((item) => {
+      item.grad = 0.0;
+    });
   }
 
   /**
@@ -157,6 +209,112 @@ export class Tensor {
   }
 
   /**
+   * Slices the tensor along a single dimension, returning a 1-D tensor view.
+   * Supports a Slice object for start/end/step semantics similar to Python.
+   * pick which dimension you’re slicing, then describe the range along that dimension.
+   * AI helped with this one.
+   * 
+   * EXAMPLE USAGE:
+   * 
+   * Extract a subset of rows from a batch: const middleRows = tensor.slice(0, new Slice({ start: 10, end: 20 })); keeps only rows 10–19 (axis 0) while preserving all columns. Handy when you want to inspect or process a mini-batch without copying the entire tensor manually.
+   * 
+   * Grab every other feature in a vector: const evenFeatures = tensor.slice(1, new Slice({ start: 0, step: 2 })); on a [batch, features] tensor returns a view with half the columns, useful for downsampling or debugging a particular feature subset.
+   * 
+   * Slice backward from the end: const lastThree = tensor.slice(0, new Slice({ start: -3 })); works like Python’s [-3:], so you can pull the trailing rows of a sequence (e.g., the final three time steps of each sample).
+   * 
+   * Strided sampling for visualization: const coarse = imageTensor.slice(1, new Slice({ start: 0, end: imageHeight, step: 4 })); lets you downsample an image-like tensor rapidly by walking every fourth row/column without writing custom loops.
+   * 
+   * @param dim - which dimension in the tensor to slice
+   * @param slice.start - where to start the slice within axis
+   * @param slice.end - where to end the slice within axis
+   * @param slice.step - positive means go from start to end, negative goes from end to start (allow for inversion)
+   */
+  slice(dim: number, slice: Slice): Tensor {
+    if (dim < 0 || dim >= this.dims.length) {
+      throw new Error(`Axis ${dim} is out of bounds for tensor with ${this.dims.length} dims`);
+    }
+
+    const length = this.dims[dim];
+    const start = slice.start ?? 0;
+    const end = slice.end ?? length;
+    const step = slice.step ?? 1;
+
+    if (step === 0) {
+      throw new Error("Slice step cannot be zero");
+    }
+
+    // normalize positive / negative values 
+    // clamp to axis length to avoid any out of bounds
+    const normalizedStart = start < 0 ? Math.max(length + start, 0) : Math.min(start, length);
+    const normalizedEnd = end < 0 ? Math.max(length + end, 0) : Math.min(end, length);
+
+    // build list of indices needed to access, in order of return desire (given step passed)
+    const indices: number[] = [];
+    if (step > 0) {
+      for (let i = normalizedStart; i < normalizedEnd; i += step) {
+        indices.push(i);
+      }
+    } else {
+      for (let i = normalizedStart; i > normalizedEnd; i += step) {
+        indices.push(i);
+      }
+    }
+
+    const newDims = [...this.dims];
+    newDims[dim] = indices.length;
+
+    const result = new Tensor(newDims, 0);
+    const srcCoords = new Array(this.dims.length).fill(0);
+    const dstCoords = new Array(this.dims.length).fill(0);
+
+    // recursively build the output
+    const fillSlice = (depth: number) => {
+      // leaf, fill tensor
+      if (depth === this.dims.length) {
+        result.set(dstCoords.slice(), this.at(srcCoords));
+        return;
+      }
+
+      if (depth === dim) {
+        for (let i = 0; i < indices.length; i++) {
+          srcCoords[depth] = indices[i];
+          dstCoords[depth] = i;
+          fillSlice(depth + 1);
+        }
+      } else {
+        for (let i = 0; i < this.dims[depth]; i++) {
+          srcCoords[depth] = i;
+          dstCoords[depth] = i;
+          fillSlice(depth + 1);
+        }
+      }
+    };
+
+    fillSlice(0);
+    return result;
+  }
+
+  /**
+   * Iterate through a tensor and perform a transormation in place.
+   * Modifies the existing data.
+   * 
+   * @param transform - the transformation function to perform on the tensor value
+   * @returns void
+   */
+  forEach(transform: (value: Value, coords: number[]) => Value | number): void {
+    this.data.forEach((val, index) => {
+      const coords = this.unflatten(index);
+      const result = transform(val, coords);
+      if (isValue(result)) {
+        val.data = result.data;
+        val.grad = result.grad;
+      } else {
+        val.data = result;
+      }
+    });
+  }
+
+  /**
    * Given a tensor, normalize each value within its dimension to a probability
    *
    * @returns a new normalized tensor
@@ -166,7 +324,7 @@ export class Tensor {
       throw new Error(`This is a scalar tensor, cannot normalize`);
     }
 
-    const prefixSums = new Map<string, number>();
+    const prefixSums = new Map<string, Value>();
     // get map key given arr of incices
     // if only 1 dim, return empty
     // else get concat of all indices except the last dim
@@ -177,16 +335,19 @@ export class Tensor {
     for (let i = 0; i < this.size; i++) {
       const loc = this.unflatten(i);
       const key = getKeyForLocation(loc);
-      const previousSum = prefixSums.get(key) ?? 0;
+      const previousSum = prefixSums.get(key) ?? new Value(0);
       // add the current value to the already summed values along this last axis dimension
-      prefixSums.set(key, previousSum + this.data[i].data);
+      prefixSums.set(key, previousSum.add(this.data[i]));
     }
 
     // perform normalization
     return this.map((val, index) => {
       const key = getKeyForLocation(index);
-      const rowSum = prefixSums.get(key) ?? 0;
-      return val.data / rowSum;
+      const rowSum = prefixSums.get(key);
+      if (!rowSum) {
+        throw new Error("missing a row sum for normalization");
+      }
+      return val.divide(rowSum);
     });
   }
 

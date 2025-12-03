@@ -72,6 +72,17 @@ export class Value {
     return this.add(other.negative());
   }
 
+  log() {
+    const x = Math.log(this.data);
+    const result = new Value(x, [this], 'log');
+
+    result._backward = () => {
+      this.grad += (1 / this.data) * result.grad;
+    }
+
+    return result;
+  }
+
   tanh() {
     const x = this.data;
     // https://mathworld.wolfram.com/HyperbolicTangent.html
@@ -89,8 +100,8 @@ export class Value {
     const x = this.data;
     const result = new Value(Math.exp(x), [this], 'e^x');
 
-    this._backward = () => {
-      result.grad += result.data * result.grad;
+    result._backward = () => {
+      this.grad += result.data * result.grad;
     }
 
     return result;

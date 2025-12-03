@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import {
+  arrange,
+  multinomial,
   multiply,
   oneHot,
   randomNormal,
@@ -9,6 +11,7 @@ import {
   zip,
 } from "../matt-torch";
 import { Tensor } from "../structures/Tensor";
+import { Value } from "../structures";
 
 const SPECIAL = ".";
 const bigramKey = (a: string, b: string): string => `${a}:${b}`;
@@ -50,7 +53,7 @@ const bigramTensor = new Tensor([uniqChars.length, uniqChars.length] as const, M
 
 // console.table(bigramTensor);
 const normalizedTensor = bigramTensor.normalize();
-console.log(normalizedTensor)
+// console.log(normalizedTensor)
 // console.log(sum(normalizedTensor[0]))
 
 // manually sample a full word from the distribution
@@ -58,7 +61,7 @@ for (let iter = 0; iter < 20; iter++) {
   let index = 0;
   let builtStr = [];
   while (true) {
-    const normalizedP = normalizedTensor.row([index]).map((item) => item.data);
+    const normalizedP = normalizedTensor.vrow([index]).map((item) => item.data);
 
     index = weightedRandomSample(normalizedP, 1)[0];
     builtStr.push(itos(index));
@@ -71,7 +74,7 @@ for (let iter = 0; iter < 20; iter++) {
 }
 let counter = 0;
 let log_likelihood = 0.0;
-for (const word of words) {
+for (const word of words.slice(0,1)) {
   const wordArr = [SPECIAL, ...word.split(""), SPECIAL];
   const comparator = zip(wordArr, wordArr.slice(1));
   for (const [a, b] of comparator) {
@@ -83,8 +86,8 @@ for (const word of words) {
 }
 
 // console.log(log_likelihood)
-const neg_log_likelihood = -log_likelihood;
-console.log(neg_log_likelihood / counter)
+// const neg_log_likelihood = -log_likelihood;
+// console.log('LOSS', neg_log_likelihood / counter)
 
 
 // GOAL: maximize log likelihood which is the same as minimizing the negative log likelihood
@@ -92,11 +95,11 @@ console.log(neg_log_likelihood / counter)
 // log(a+b+c) = log(a) + log(b) + log(c)
 
 // CREATE TRAINING SET
-console.log(words.length);
+// console.log(words.length);
 // build map of bigrams and their frequencies
 const xs: number[] = [];
 const ys: number[] = [];
-for (const word of words.slice(0,1)) {
+for (const word of words.slice(0, 200)) {
   const wordArr = [SPECIAL, ...word.split(""), SPECIAL];
   const comparator = zip(wordArr, wordArr.slice(1));
   for (const [a, b] of comparator) {
@@ -105,14 +108,46 @@ for (const word of words.slice(0,1)) {
   }
 }
 
-// FORWARD PASS
-const xEncoded = Tensor.fromNestedArray([xs.length, uniqChars.length], oneHot(xs, uniqChars.length));
-console.log(xEncoded.shape())
-const weights = new Tensor([uniqChars.length, uniqChars.length], () => randomNormal());
-console.log(weights.shape())
+let weights = new Tensor([uniqChars.length, uniqChars.length], () => randomNormal());
+for (let i = 0; i < 25; i++) {
+  console.time(`TRAINING_ITERATION_${i}`);
+  // forward pass
+  const xEncoded = Tensor.fromNestedArray([xs.length, uniqChars.length], oneHot(xs, uniqChars.length));
+  // LOG COUNTS also called logits
+  console.timeLog(`TRAINING_ITERATION_${i}`)
+  const logits = multiply(xEncoded, weights);
+  console.timeLog(`TRAINING_ITERATION_${i}`)
+  // SOFTMAX - take an entry from a layer, exponentiate, and then normalize into a probability
+  const sMax = softmax(logits); // this is ypred from micrograd\
+  // sMax.show()
+  const t = arrange(xs.length);
+  const loss = t.map((item, _) => sMax.at([item.data, ys[item.data]]).log().negative());
+  const weightLimiter = weights.map((item) => item.pow(2)).sum().divide(new Value(weights.size)).multiply(new Value(0.01));
+  const avgLoss = loss.sum().divide(new Value(loss.size)).add(weightLimiter);
+  console.log(`${i} loss: ${avgLoss.data}`);
+  weights.zero_grad();
+  avgLoss.backward();
 
-// LOG COUNTS also called logits
-const logits = multiply(xEncoded, weights);
-// SOFTMAX - take an entry from a layer, exponentiate, and then normalize into a probability
-const sMax = softmax(logits);
-console.log(sMax.shape());
+  weights.forEach((item) => item.data += -15 * item.grad);
+  console.timeEnd(`TRAINING_ITERATION_${i}`)
+}
+
+// SAMPLE from the model
+for (let i = 0; i < 5; i++) {
+  let result: string[] = [];
+  let idx = 0;
+  while (true) {
+    const xEncoded = Tensor.fromNestedArray([1, uniqChars.length], oneHot([idx], uniqChars.length));
+    // LOG COUNTS also called logits
+    const logits = multiply(xEncoded, weights);
+    // SOFTMAX - take an entry from a layer, exponentiate, and then normalize into a probability
+    const sMax = softmax(logits); // this is ypred from micrograd
+    const probabilities = sMax.row([0]);
+    idx = multinomial(probabilities, 1)[0];
+    result.push(itos(idx));
+    if (idx === 0) {
+      break;
+    }
+  }
+  console.log(result.join(''))
+}

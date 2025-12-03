@@ -22,6 +22,43 @@ export function weightedRandomSample(
   return result;
 }
 
+/**
+ * Samples indices from a categorical distribution defined by `values`.
+ * - `values` must be a 1-D tensor containing non-negative weights (not necessarily normalized).
+ * - Returns `numSamples` draws with replacement.
+ */
+export function multinomial(values: Tensor, numSamples: number): number[] {
+  if (values.dims.length !== 1) {
+    throw new Error("multinomial currently only supports 1-D tensors");
+  }
+  if (numSamples <= 0) {
+    return [];
+  }
+
+  const weights = values.vrow([]);
+  const totalWeight = weights.reduce((acc, cur) => acc + cur.data, 0);
+  if (totalWeight <= 0) {
+    throw new Error("Sum of weights must be positive to sample");
+  }
+
+  const probabilities = weights.map(w => w.data / totalWeight);
+  const draws: number[] = [];
+
+  for (let sample = 0; sample < numSamples; sample++) {
+    const r = randFloat(0, 1);
+    let cursor = 0;
+    for (let i = 0; i < probabilities.length; i++) {
+      cursor += probabilities[i];
+      if (r <= cursor) {
+        draws.push(i);
+        break;
+      }
+    }
+  }
+
+  return draws;
+}
+
 export const randInt = (low: number, high: number): number => Math.floor(Math.random() * (Math.floor(high) - Math.ceil(low) + 1) + Math.ceil(low));
 export const randFloat = (low: number, high: number) : number => Math.random() * (high - low) + low;
 export const sum = (arr: number[], start?: number): number => arr.reduce((acc, cur) => acc += cur, start ?? 0);
@@ -96,11 +133,9 @@ export const multiply = (a: Tensor, b: Tensor): Tensor => {
   for (let i = 0; i < a.dims[0]; i++) {
     for (let j = 0; j < b.dims[1]; j++) {
       for (let k = 0; k < a.dims[1]; k++) {
-        // TODO: might need to use the value multiply function
-        // figure that out
-        const currentProduct = result.at([i, j]).data;
-        const additionalProduct = a.at([i, k]).data * b.at([k, j]).data;
-        result.set([i, j], currentProduct + additionalProduct);
+        const currentProduct = result.at([i, j]);
+        const additionalProduct = a.at([i, k]).multiply(b.at([k, j]));
+        result.set([i, j], currentProduct.add(additionalProduct));
       }
     }
   }
@@ -111,4 +146,9 @@ export const multiply = (a: Tensor, b: Tensor): Tensor => {
 export const softmax = (t: Tensor): Tensor => {
   const exponentiated = t.map(item => item.exp());
   return exponentiated.normalize();
+}
+
+export const arrange = (count: number): Tensor => {
+  const filler = new Array(count).fill(0).map((_, index) => index);
+  return Tensor.fromNestedArray([count], filler);
 }
