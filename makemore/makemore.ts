@@ -99,7 +99,7 @@ for (const word of words.slice(0,1)) {
 // build map of bigrams and their frequencies
 const xs: number[] = [];
 const ys: number[] = [];
-for (const word of words.slice(0, 200)) {
+for (const word of words.slice(0, 50)) {
   const wordArr = [SPECIAL, ...word.split(""), SPECIAL];
   const comparator = zip(wordArr, wordArr.slice(1));
   for (const [a, b] of comparator) {
@@ -109,7 +109,7 @@ for (const word of words.slice(0, 200)) {
 }
 
 let weights = new Tensor([uniqChars.length, uniqChars.length], () => randomNormal());
-for (let i = 0; i < 25; i++) {
+for (let i = 0; i < 100; i++) {
   console.time(`TRAINING_ITERATION_${i}`);
   // forward pass
   const xEncoded = Tensor.fromNestedArray([xs.length, uniqChars.length], oneHot(xs, uniqChars.length));
@@ -133,21 +133,21 @@ for (let i = 0; i < 25; i++) {
 }
 
 // SAMPLE from the model
-for (let i = 0; i < 5; i++) {
-  let result: string[] = [];
-  let idx = 0;
-  while (true) {
-    const xEncoded = Tensor.fromNestedArray([1, uniqChars.length], oneHot([idx], uniqChars.length));
-    // LOG COUNTS also called logits
-    const logits = multiply(xEncoded, weights);
-    // SOFTMAX - take an entry from a layer, exponentiate, and then normalize into a probability
-    const sMax = softmax(logits); // this is ypred from micrograd
-    const probabilities = sMax.row([0]);
-    idx = multinomial(probabilities, 1)[0];
-    result.push(itos(idx));
-    if (idx === 0) {
-      break;
-    }
-  }
-  console.log(result.join(''))
-}
+// for (let i = 0; i < 5; i++) {
+//   let result: string[] = [];
+//   let idx = 0;
+//   while (true) {
+//     const xEncoded = Tensor.fromNestedArray([1, uniqChars.length], oneHot([idx], uniqChars.length));
+//     // LOG COUNTS also called logits
+//     const logits = multiply(xEncoded, weights);
+//     // SOFTMAX - take an entry from a layer, exponentiate, and then normalize into a probability
+//     const sMax = softmax(logits); // this is ypred from micrograd
+//     const probabilities = sMax.row([0]);
+//     idx = multinomial(probabilities, 1)[0];
+//     result.push(itos(idx));
+//     if (idx === 0) {
+//       break;
+//     }
+//   }
+//   console.log(result.join(''))
+// }
