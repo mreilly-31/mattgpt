@@ -10,8 +10,7 @@ interface SliceParams {
   start?: number;
   end?: number;
   step?: number;
-};
-
+}
 
 /**
  * My tensor implementation, following some pytorch naming etc but mostly just winging it
@@ -77,6 +76,7 @@ export class Tensor {
    * @returns the dimensions of the tensor
    */
   shape(): number[] {
+    console.log(this.dims)
     return this.dims as number[];
   }
 
@@ -86,7 +86,7 @@ export class Tensor {
     const visit = (prefix: number[], depth: number) => {
       if (depth === this.dims.length - 1) {
         const rowValues = this.vrow(prefix)
-          .map((value) => is_grad ? value.grad : value.data)
+          .map((value) => (is_grad ? value.grad : value.data))
           .join(", ");
         chunks.push(
           prefix.length ? " ".repeat(prefix.length) : "",
@@ -104,7 +104,11 @@ export class Tensor {
     };
 
     visit([], 0);
-    console.log(`Tensor of shape ${this.shape()} (${is_grad ? 'Grad' : 'Data'}):\n${chunks.join("\n")}`);
+    console.log(
+      `Tensor of shape ${this.shape()} (${
+        is_grad ? "Grad" : "Data"
+      }):\n${chunks.join("\n")}\n=======\n`
+    );
   }
 
   show_grad(): void {
@@ -113,7 +117,7 @@ export class Tensor {
 
   /**
    * Return the sum of all values in the tensor
-   * 
+   *
    * @param start optional start value for the summation
    * @returns the sum of all values in the tensor.
    */
@@ -137,7 +141,7 @@ export class Tensor {
    * Perform a backward pass on the tensor
    */
   backward() {
-    this.data.forEach(item => item.backward());
+    this.data.forEach((item) => item.backward());
   }
 
   /**
@@ -169,7 +173,7 @@ export class Tensor {
 
   /**
    * Zero out the grads of each value in the tensor.
-   * 
+   *
    * Mutates the tensor in-place.
    */
   zero_grad(): void {
@@ -213,17 +217,17 @@ export class Tensor {
    * Supports a Slice object for start/end/step semantics similar to Python.
    * pick which dimension you’re slicing, then describe the range along that dimension.
    * AI helped with this one.
-   * 
+   *
    * EXAMPLE USAGE:
-   * 
+   *
    * Extract a subset of rows from a batch: const middleRows = tensor.slice(0, new Slice({ start: 10, end: 20 })); keeps only rows 10–19 (axis 0) while preserving all columns. Handy when you want to inspect or process a mini-batch without copying the entire tensor manually.
-   * 
+   *
    * Grab every other feature in a vector: const evenFeatures = tensor.slice(1, new Slice({ start: 0, step: 2 })); on a [batch, features] tensor returns a view with half the columns, useful for downsampling or debugging a particular feature subset.
-   * 
+   *
    * Slice backward from the end: const lastThree = tensor.slice(0, new Slice({ start: -3 })); works like Python’s [-3:], so you can pull the trailing rows of a sequence (e.g., the final three time steps of each sample).
-   * 
+   *
    * Strided sampling for visualization: const coarse = imageTensor.slice(1, new Slice({ start: 0, end: imageHeight, step: 4 })); lets you downsample an image-like tensor rapidly by walking every fourth row/column without writing custom loops.
-   * 
+   *
    * @param dim - which dimension in the tensor to slice
    * @param slice.start - where to start the slice within axis
    * @param slice.end - where to end the slice within axis
@@ -231,7 +235,9 @@ export class Tensor {
    */
   slice(dim: number, slice: SliceParams): Tensor {
     if (dim < 0 || dim >= this.dims.length) {
-      throw new Error(`Axis ${dim} is out of bounds for tensor with ${this.dims.length} dims`);
+      throw new Error(
+        `Axis ${dim} is out of bounds for tensor with ${this.dims.length} dims`
+      );
     }
 
     const length = this.dims[dim];
@@ -243,10 +249,12 @@ export class Tensor {
       throw new Error("Slice step cannot be zero");
     }
 
-    // normalize positive / negative values 
+    // normalize positive / negative values
     // clamp to axis length to avoid any out of bounds
-    const normalizedStart = start < 0 ? Math.max(length + start, 0) : Math.min(start, length);
-    const normalizedEnd = end < 0 ? Math.max(length + end, 0) : Math.min(end, length);
+    const normalizedStart =
+      start < 0 ? Math.max(length + start, 0) : Math.min(start, length);
+    const normalizedEnd =
+      end < 0 ? Math.max(length + end, 0) : Math.min(end, length);
 
     // build list of indices needed to access, in order of return desire (given step passed)
     const indices: number[] = [];
@@ -295,9 +303,225 @@ export class Tensor {
   }
 
   /**
+   * Advanced indexing helper similar to PyTorch's tensor[tensor_indices] semantics.
+   * Treats `indices` as selecting entries along a single axis while preserving the other axes.
+   * The output shape replaces the indexed axis with the full shape of the index tensor.
+   *
+   * Example: if `lookup` has shape [num_embeddings, embedding_dim] and `indices`
+   * is [batch, block], `lookup.gather(0, indices)` returns a tensor of shape
+   * [batch, block, embedding_dim].
+   *
+   * @param dim axis to index along
+   * @param indices tensor of integer indices, negatives allowed (Python-style)
+   */
+  gather(dim: number, indices: Tensor): Tensor {
+    if (dim < 0 || dim >= this.dims.length) {
+      throw new Error(
+        `Axis ${dim} is out of bounds for tensor with ${this.dims.length} dims`
+      );
+    }
+
+    if (indices.dims.length === 0) {
+      throw new Error("Indices tensor must have at least one dimension");
+    }
+
+    const axisLength = this.dims[dim];
+    const beforeDims = this.dims.slice(0, dim);
+    const afterDims = this.dims.slice(dim + 1);
+    const resultDims = [...beforeDims, ...indices.dims, ...afterDims];
+
+    const result = new Tensor(resultDims as number[], 0);
+    const srcCoords = new Array(this.dims.length).fill(0);
+    const dstCoords = new Array(resultDims.length).fill(0);
+    const indexCoords = new Array(indices.dims.length).fill(0);
+
+    const normalizeIndex = (value: number): number => {
+      if (!Number.isFinite(value)) {
+        throw new Error("Index tensor contains non-finite values");
+      }
+      if (!Number.isInteger(value)) {
+        throw new Error("Index tensor must contain integer values");
+      }
+
+      let normalized = value;
+      if (normalized < 0) {
+        normalized = axisLength + normalized;
+      }
+
+      if (normalized < 0 || normalized >= axisLength) {
+        throw new Error(
+          `Index ${value} is out of bounds for axis length ${axisLength}`
+        );
+      }
+
+      return normalized;
+    };
+
+    const fillAfter = (depth: number) => {
+      if (depth === afterDims.length) {
+        result.set(dstCoords.slice(), this.at(srcCoords));
+        return;
+      }
+
+      const srcAxis = dim + 1 + depth;
+      const dstAxis = beforeDims.length + indices.dims.length + depth;
+      for (let i = 0; i < afterDims[depth]; i++) {
+        srcCoords[srcAxis] = i;
+        dstCoords[dstAxis] = i;
+        fillAfter(depth + 1);
+      }
+    };
+
+    const fillIndices = (depth: number) => {
+      if (depth === indices.dims.length) {
+        const indexValue = normalizeIndex(indices.at(indexCoords).data);
+        srcCoords[dim] = indexValue;
+        fillAfter(0);
+        return;
+      }
+
+      const dstAxis = beforeDims.length + depth;
+      for (let i = 0; i < indices.dims[depth]; i++) {
+        indexCoords[depth] = i;
+        dstCoords[dstAxis] = i;
+        fillIndices(depth + 1);
+      }
+    };
+
+    const fillBefore = (depth: number) => {
+      if (depth === beforeDims.length) {
+        fillIndices(0);
+        return;
+      }
+
+      for (let i = 0; i < beforeDims[depth]; i++) {
+        srcCoords[depth] = i;
+        dstCoords[depth] = i;
+        fillBefore(depth + 1);
+      }
+    };
+
+    fillBefore(0);
+    return result;
+  }
+
+  reshape(newDims: IndexTuple): Tensor {
+    if (newDims.length === 0) {
+      throw new Error("Reshape requires at least one dimension");
+    }
+
+    let inferIndex = -1;
+    let explicitProduct = 1;
+    newDims.forEach((dim, idx) => {
+      if (dim === -1) {
+        if (inferIndex !== -1) {
+          throw new Error("Only one dimension can be inferred with -1");
+        }
+        inferIndex = idx;
+        return;
+      }
+
+      if (dim <= 0) {
+        throw new Error("Reshape dimensions must be positive (or -1 to infer)");
+      }
+
+      explicitProduct *= dim;
+    });
+
+    const resolvedDims = [...newDims];
+    if (inferIndex !== -1) {
+      if (this.size % explicitProduct !== 0) {
+        throw new Error(
+          "Cannot infer reshape dimension due to incompatible tensor size"
+        );
+      }
+      resolvedDims[inferIndex] = this.size / explicitProduct;
+    }
+
+    const total = resolvedDims.reduce((acc, cur) => acc * cur, 1);
+    if (total !== this.size) {
+      throw new Error(
+        `Cannot reshape tensor of ${this.size} elements into shape ${resolvedDims}`
+      );
+    }
+
+    const result = new Tensor(resolvedDims as number[], 0);
+    for (let i = 0; i < this.size; i++) {
+      result.data[i] = this.data[i];
+    }
+    return result;
+  }
+
+  view(dims: IndexTuple): Tensor;
+  view(...dims: number[]): Tensor;
+  view(...args: (number | IndexTuple)[]): Tensor {
+    if (args.length === 0) {
+      throw new Error("view requires at least one dimension");
+    }
+
+    if (args.length === 1 && Array.isArray(args[0])) {
+      return this.reshape(args[0] as number[]);
+    }
+
+    return this.reshape(args as number[]);
+  }
+
+  static concat(dim: number, tensors: Tensor[]): Tensor {
+    if (tensors.length === 0) throw new Error("Need at least one tensor");
+    const ref = tensors[0];
+
+    tensors.forEach((t) => {
+      if (t.dims.length !== ref.dims.length) throw new Error("Rank mismatch");
+      t.dims.forEach((size, axis) => {
+        if (axis !== dim && size !== ref.dims[axis]) {
+          throw new Error(
+            `Axis ${axis} mismatch (${size} vs ${ref.dims[axis]})`
+          );
+        }
+      });
+    });
+
+    const newDims = [...ref.dims];
+    newDims[dim] = tensors.reduce((acc, t) => acc + t.dims[dim], 0);
+
+    const result = new Tensor(newDims as number[], 0);
+    let cursor = 0;
+    for (const tensor of tensors) {
+      for (let i = 0; i < tensor.size; i++) {
+        const coords = tensor.unflatten(i);
+        const dstCoords = coords.slice();
+        dstCoords[dim] += cursor;
+        result.set(dstCoords, tensor.at(coords));
+      }
+      cursor += tensor.dims[dim];
+    }
+    return result;
+  }
+
+  unbind(dim: number): Tensor[] {
+    if (dim < 0 || dim >= this.dims.length) {
+      throw new Error(
+        `Axis ${dim} is out of bounds for tensor with ${this.dims.length} dims`
+      );
+    }
+
+    const withoutDim = this.dims.filter((_, index) => index !== dim);
+    if (withoutDim.length === 0) {
+      throw new Error("Unbinding to scalars is not supported");
+    }
+
+    const views: Tensor[] = [];
+    for (let i = 0; i < this.dims[dim]; i++) {
+      const slice = this.slice(dim, { start: i, end: i + 1 });
+      views.push(slice.reshape(withoutDim));
+    }
+    return views;
+  }
+
+  /**
    * Iterate through a tensor and perform a transormation in place.
    * Modifies the existing data.
-   * 
+   *
    * @param transform - the transformation function to perform on the tensor value
    * @returns void
    */
