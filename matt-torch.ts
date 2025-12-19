@@ -148,7 +148,6 @@ export const multiply = (a: Tensor, b: Tensor): Tensor => {
   const shared = a.dims[1];
   const cols = b.dims[1];
   const result: Tensor = new Tensor([rows, cols], 0);
-  result.shape()
   // Cache rows/columns so the inner loop only performs Value ops.
   const aRows: Value[][] = new Array(rows);
   for (let i = 0; i < rows; i++) {
@@ -168,12 +167,7 @@ export const multiply = (a: Tensor, b: Tensor): Tensor => {
     const row = aRows[i];
     for (let j = 0; j < cols; j++) {
       const col = bCols[j];
-      let sum: Value | null = null;
-      for (let k = 0; k < shared; k++) {
-        const product = row[k].multiply(col[k]);
-        sum = sum ? sum.add(product) : product;
-      }
-      result.set([i, j], sum ?? new Value(0));
+      result.set([i, j], Value.dot(row, col));
     }
   }
 

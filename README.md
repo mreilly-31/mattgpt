@@ -4,7 +4,7 @@ in typescript
 
 for fun
 
-
+it's not illegal
 
 **update**
 There is still a lot I could do to optimize, but matmul is just not gonna happen at any kind of scale with this setup

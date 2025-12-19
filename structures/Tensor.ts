@@ -115,6 +115,27 @@ export class Tensor {
     this.show(true);
   }
 
+  toJSON(): { dims: number[]; data: number[] } {
+    const data = new Array(this.size);
+    for (let i = 0; i < this.size; i++) {
+      data[i] = this.data[i].data;
+    }
+    return { dims: [...this.dims], data };
+  }
+
+  static fromJSON(payload: { dims: number[]; data: number[] }): Tensor {
+    const tensor = new Tensor(payload.dims, 0);
+    if (payload.data.length !== tensor.size) {
+      throw new Error(
+        `JSON data length ${payload.data.length} does not match tensor size ${tensor.size}`
+      );
+    }
+    for (let i = 0; i < payload.data.length; i++) {
+      tensor.data[i] = new Value(payload.data[i]);
+    }
+    return tensor;
+  }
+
   /**
    * Return the sum of all values in the tensor
    *

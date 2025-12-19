@@ -5,6 +5,7 @@ export class Value {
   _prev: Set<Value>;
   op: string;
   label: string;
+  static gradEnabled = true;
 
   constructor(
     data: number,
@@ -24,40 +25,93 @@ export class Value {
     return new Value(val);
   }
 
+  static dot(row: Value[], col: Value[]): Value {
+    if (row.length !== col.length) {
+      throw new Error("Dot product requires matching lengths");
+    }
+    let sum = 0;
+    for (let i = 0; i < row.length; i++) {
+      sum += row[i].data * col[i].data;
+    }
+    if (!Value.gradEnabled) {
+      return new Value(sum);
+    }
+    const result = new Value(sum, [...row, ...col], "dot");
+    result._backward = () => {
+      for (let i = 0; i < row.length; i++) {
+        row[i].grad += col[i].data * result.grad;
+        col[i].grad += row[i].data * result.grad;
+      }
+    };
+    return result;
+  }
+
+  static withNoGrad<T>(fn: () => T): T {
+    const previous = Value.gradEnabled;
+    Value.gradEnabled = false;
+    try {
+      return fn();
+    } finally {
+      Value.gradEnabled = previous;
+    }
+  }
+
+  private static make(
+    data: number,
+    children: Value[],
+    op: string,
+    backward: (result: Value) => void
+  ): Value {
+    if (!Value.gradEnabled) {
+      return new Value(data);
+    }
+    const result = new Value(data, children, op);
+    result._backward = () => backward(result);
+    return result;
+  }
+
   print() {
     return `${this.label}: Data: ${this.data}, Grad: ${this.grad}`;
   }
 
   add(other: Value) {
-    const result = new Value(this.data + other.data, [this, other], "+");
-
-    result._backward = () => {
+    return Value.make(this.data + other.data, [this, other], "+", (result) => {
       this.grad += 1.0 * result.grad;
       other.grad += 1.0 * result.grad;
-    };
+    });
+  }
 
-    return result;
+  addScalar(other: number) {
+    return Value.make(this.data + other, [this], "+c", (result) => {
+      this.grad += 1.0 * result.grad;
+    });
   }
 
   multiply(other: Value) {
-    const result = new Value(this.data * other.data, [this, other], "*");
-
-    result._backward = () => {
+    return Value.make(this.data * other.data, [this, other], "*", (result) => {
       this.grad += other.data * result.grad;
       other.grad += this.data * result.grad;
-    };
+    });
+  }
 
-    return result;
+  mulScalar(other: number) {
+    return Value.make(this.data * other, [this], "*c", (result) => {
+      this.grad += other * result.grad;
+    });
   }
 
   pow(raiseTo: number) {
-    const result = new Value(this.data ** raiseTo, [this], '^');
+    return Value.make(this.data ** raiseTo, [this], "^", (result) => {
+      this.grad += raiseTo * (this.data ** (raiseTo - 1)) * result.grad;
+    });
+  }
 
-    result._backward = () => {
-      this.grad += raiseTo * (this.data**(raiseTo - 1)) * result.grad;
-    }
+  subScalar(other: number) {
+    return this.addScalar(-other);
+  }
 
-    return result;
+  divScalar(other: number) {
+    return this.mulScalar(1 / other);
   }
 
   divide(other: Value) {
@@ -65,7 +119,7 @@ export class Value {
   }
 
   negative() {
-    return this.multiply(new Value(-1));
+    return this.mulScalar(-1);
   }
 
   subtract(other: Value) {
@@ -73,38 +127,24 @@ export class Value {
   }
 
   log() {
-    const x = Math.log(this.data);
-    const result = new Value(x, [this], 'log');
-
-    result._backward = () => {
+    return Value.make(Math.log(this.data), [this], "log", (result) => {
       this.grad += (1 / this.data) * result.grad;
-    }
-
-    return result;
+    });
   }
 
   tanh() {
     const x = this.data;
     // https://mathworld.wolfram.com/HyperbolicTangent.html
     const t = (Math.exp(2 * x) - 1) / (Math.exp(2 * x) + 1);
-    const result = new Value(t, [this], 'tanh()');
-
-    result._backward = () => {
-      this.grad += (1 - t**2) * result.grad;
-    }
-
-    return result;
+    return Value.make(t, [this], "tanh()", (result) => {
+      this.grad += (1 - t ** 2) * result.grad;
+    });
   }
 
   exp() {
-    const x = this.data;
-    const result = new Value(Math.exp(x), [this], 'e^x');
-
-    result._backward = () => {
+    return Value.make(Math.exp(this.data), [this], "e^x", (result) => {
       this.grad += result.data * result.grad;
-    }
-
-    return result;
+    });
   }
 
   backward() {
