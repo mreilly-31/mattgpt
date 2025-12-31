@@ -147,6 +147,13 @@ export class Value {
     });
   }
 
+  relu() {
+    const out = Math.max(0, this.data);
+    return Value.make(out, [this], "ReLU", (result) => {
+      this.grad += (this.data > 0 ? 1 : 0) * result.grad;
+    });
+  }
+
   backward() {
     const topo: Value[] = [];
     const visited = new Set<Value>();

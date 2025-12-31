@@ -1,5 +1,5 @@
-import { log } from "node:console";
-import { Tensor, Value } from "./structures";
+import { Tensor } from "./structures/Tensor";
+import { Value } from "./structures/Value";
 
 // super basic random sample algorithm, I'm sure its good enough
 export function weightedRandomSample(
@@ -35,26 +35,34 @@ export function shuffle(array: any[]): any[] {
   return result;
 }
 
+export const ninf = -1e9;
+
 /**
  * Samples indices from a categorical distribution defined by `values`.
  * - `values` must be a 1-D tensor containing non-negative weights (not necessarily normalized).
  * - Returns `numSamples` draws with replacement.
  */
 export function multinomial(values: Tensor, numSamples: number): number[] {
-  if (values.dims.length !== 1) {
+  if (values.shape.length !== 1) {
     throw new Error("multinomial currently only supports 1-D tensors");
   }
   if (numSamples <= 0) {
     return [];
   }
 
-  const weights = values.vrow([]);
-  const totalWeight = weights.reduce((acc, cur) => acc + cur.data, 0);
+  const weights = values.data;
+  let totalWeight = 0;
+  for (let i = 0; i < weights.length; i++) {
+    totalWeight += weights[i];
+  }
   if (totalWeight <= 0) {
     throw new Error("Sum of weights must be positive to sample");
   }
 
-  const probabilities = weights.map((w) => w.data / totalWeight);
+  const probabilities = new Array(weights.length);
+  for (let i = 0; i < weights.length; i++) {
+    probabilities[i] = weights[i] / totalWeight;
+  }
   const draws: number[] = [];
 
   for (let sample = 0; sample < numSamples; sample++) {
@@ -135,66 +143,102 @@ export const randomNormal = (): number => {
   return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 };
 
-export const multiply = (a: Tensor, b: Tensor): Tensor => {
-  if (a.dims.length !== 2 || b.dims.length !== 2) {
-    throw new Error("I can only do 2d matrices right now");
-  }
+export const multiply = (a: Tensor, b: Tensor): Tensor => a.matmul(b);
 
-  if (a.dims[1] !== b.dims[0]) {
-    throw new Error("Cant multiply these");
-  }
-
-  const rows = a.dims[0];
-  const shared = a.dims[1];
-  const cols = b.dims[1];
-  const result: Tensor = new Tensor([rows, cols], 0);
-  // Cache rows/columns so the inner loop only performs Value ops.
-  const aRows: Value[][] = new Array(rows);
-  for (let i = 0; i < rows; i++) {
-    aRows[i] = a.vrow([i]);
-  }
-
-  const bCols: Value[][] = new Array(cols);
-  for (let j = 0; j < cols; j++) {
-    const column = new Array(shared);
-    for (let k = 0; k < shared; k++) {
-      column[k] = b.at([k, j]);
-    }
-    bCols[j] = column as Value[];
-  }
-
-  for (let i = 0; i < rows; i++) {
-    const row = aRows[i];
-    for (let j = 0; j < cols; j++) {
-      const col = bCols[j];
-      result.set([i, j], Value.dot(row, col));
-    }
-  }
-
-  return result;
-};
-
-export const softmax = (t: Tensor): Tensor => {
-  const exponentiated = t.map((item) => item.exp());
-  return exponentiated.normalize();
-};
+export const softmax = (t: Tensor, dim?: number): Tensor => t.softmax(dim);
 
 export const arrange = (count: number): Tensor => {
-  const filler = new Array(count).fill(0).map((_, index) => index);
-  return Tensor.fromNestedArray([count], filler);
+  const filler = new Array(count);
+  for (let i = 0; i < count; i++) {
+    filler[i] = i;
+  }
+  return Tensor.fromArray([count], filler);
 };
 
-export const crossEntropy = (logits: Tensor, target: Tensor): Value => {
-  const sMax = softmax(logits);
-  const rowIdxs = arrange(sMax.dims[0]);
-  const picked = rowIdxs.map((_, [row]) => {
-    const col = target.at([row]).data;
-    return sMax.at([row, col]);
-  });
-  const negLogLikelihood = picked
-    .map((val) => val.log())
-    .sum()
-    .divide(new Value(picked.size))
-    .negative();
-  return negLogLikelihood;
+export const oneHotTensor = (
+  indices: number[] | Tensor,
+  numClasses: number
+): Tensor => {
+  const values = Array.isArray(indices) ? indices : Array.from(indices.data);
+  const batch = values.length;
+  const data = new Array(batch * numClasses).fill(0);
+  for (let i = 0; i < batch; i++) {
+    const idx = values[i];
+    if (!Number.isInteger(idx)) {
+      throw new Error(`Target index ${idx} is not an integer`);
+    }
+    if (idx < 0 || idx >= numClasses) {
+      throw new Error(`Target index ${idx} is out of bounds`);
+    }
+    data[i * numClasses + idx] = 1;
+  }
+  return Tensor.fromArray([batch, numClasses], data);
 };
+
+export const crossEntropy = (logits: Tensor, target: Tensor): Tensor => {
+  const logProbs = logits.logsoftmax(1);
+  const targetOneHot = oneHotTensor(target, logits.shape[1]);
+  const picked = logProbs.mul(targetOneHot).sum(1);
+  return picked.sum().mulScalar(-1 / logits.shape[0]);
+};
+
+export const triu = (input: Tensor, diagonal = 0, grad: boolean = true): Tensor => {
+  if (input.shape.length !== 2) {
+    throw new Error("triu currently supports 2D tensors only");
+  }
+  const [rows, cols] = input.shape;
+  const data = new Array(input.size).fill(0);
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < cols; j++) {
+      if (j - i >= diagonal) {
+        const index = i * input.strides[0] + j * input.strides[1];
+        data[index] = 1;
+      }
+    }
+  }
+  const mask = Tensor.fromArray([rows, cols], data, grad);
+  return input.mul(mask);
+};
+
+export const ones = (shape: number[], grad: boolean = true): Tensor => {
+  if (shape.length === 0) {
+    return Tensor.fromArray([], [1]);
+  }
+  const size = shape.reduce((acc, cur) => acc * cur, 1);
+  const data = new Array(size).fill(1);
+  return Tensor.fromArray(shape, data, grad);
+};
+
+/**
+ * Kaiming uniform-ish init (common default in deep learning).
+ * For demo: uniform in [-bound, bound], with bound ~ sqrt(1 / inFeatures)
+ * https://www.geeksforgeeks.org/deep-learning/kaiming-initialization-in-deep-learning/
+ * https://arxiv.org/pdf/1502.01852
+ *
+ * (PyTorch uses kaiming_uniform_ with a=sqrt(5); this is a close, simple version.)
+ */
+export const initWeights = (
+  in_features: number,
+  out_features: number
+): Tensor => {
+  const bound = Math.sqrt(1 / in_features);
+  const size = in_features * out_features;
+  const data = new Array(size);
+  for (let i = 0; i < size; i++) {
+    data[i] = randFloat(-bound, bound);
+  }
+  return Tensor.fromArray([in_features, out_features], data);
+};
+
+/**
+ * Bias uniform in [-bound, bound] where bound = 1/sqrt(fan_in),
+ * matching the typical PyTorch linear bias initialization idea.
+ */
+export const initBias = (in_features: number, out_features: number): Tensor => {
+  const bound = 1 / Math.sqrt(in_features);
+  const data = new Array(out_features);
+  for (let i = 0; i < out_features; i++) {
+    data[i] = randFloat(-bound, bound);
+  }
+  return Tensor.fromArray([out_features], data);
+}
