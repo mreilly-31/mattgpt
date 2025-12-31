@@ -1,4 +1,4 @@
-import { FloatTensor, Tape, Tensor } from "../structures";
+import { Tape, Tensor } from "../structures";
 
 type Shape = number[];
 
@@ -67,11 +67,8 @@ const main = () => {
   const data = createData(size);
   const strides = buildStrides(shape);
 
-  const makeTensor = () =>
-    new Tensor(shape, (coords) => data[flattenIndex(coords, strides)]);
-
   const makeFloatTensor = (tape: Tape) =>
-    FloatTensor.fromArray(shape, data, true, tape);
+    Tensor.fromArray(shape, data, true, tape);
 
   console.log(`shape=${shape.join("x")} size=${size} iterations=${iterations}`);
 
@@ -84,17 +81,6 @@ const main = () => {
   time("FloatTensor forward+backward", iterations, () => {
     const tape = new Tape();
     const t = makeFloatTensor(tape);
-    const out = t.relu().sum();
-    out.backward();
-  });
-
-  time("Tensor forward", iterations, () => {
-    const t = makeTensor();
-    t.relu().sum();
-  });
-
-  time("Tensor forward+backward", iterations, () => {
-    const t = makeTensor();
     const out = t.relu().sum();
     out.backward();
   });
