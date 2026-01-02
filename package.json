@@ -8,7 +8,8 @@
   "description": "ts implementation of andrejs ai course",
   "main": "index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path structures/wasm-matmul/Cargo.toml && cp structures/wasm-matmul/target/wasm32-unknown-unknown/release/wasm_matmul.wasm structures/wasm/matmul.wasm"
   },
   "author": "matt.reilly@playbookexp.com",
   "license": "MIT",

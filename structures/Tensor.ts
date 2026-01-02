@@ -1,3 +1,5 @@
+import { getMatmulBackend, matmulWasm } from "./wasm/matmul";
+
 type Shape = number[];
 
 type TapeNode = {
@@ -773,17 +775,27 @@ export class Tensor {
 
     const tape = resolveTape(this, other);
     const requiresGrad = this.requiresGrad || other.requiresGrad;
-    const out = new Tensor([m, n], { requiresGrad, tape });
+    const backend = getMatmulBackend();
+    const out = backend
+      ? new Tensor([m, n], {
+          data: matmulWasm(backend, this.data, other.data, m, k, n),
+          requiresGrad,
+          tape,
+          reuseData: true
+        })
+      : new Tensor([m, n], { requiresGrad, tape });
 
-    for (let i = 0; i < m; i++) {
-      for (let j = 0; j < n; j++) {
-        let acc = 0;
-        for (let p = 0; p < k; p++) {
-          const aIndex = i * this.strides[0] + p * this.strides[1];
-          const bIndex = p * other.strides[0] + j * other.strides[1];
-          acc += this.data[aIndex] * other.data[bIndex];
+    if (!backend) {
+      for (let i = 0; i < m; i++) {
+        for (let j = 0; j < n; j++) {
+          let acc = 0;
+          for (let p = 0; p < k; p++) {
+            const aIndex = i * this.strides[0] + p * this.strides[1];
+            const bIndex = p * other.strides[0] + j * other.strides[1];
+            acc += this.data[aIndex] * other.data[bIndex];
+          }
+          out.data[i * out.strides[0] + j * out.strides[1]] = acc;
         }
-        out.data[i * out.strides[0] + j * out.strides[1]] = acc;
       }
     }
 

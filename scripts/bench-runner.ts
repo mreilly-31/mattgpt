@@ -23,9 +23,14 @@ const parseResult = (output: string, label: string): Result => {
   };
 };
 
-const runOnce = (label: string, command: string, args: string[]): Result => {
+const runOnce = (
+  label: string,
+  command: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv
+): Result => {
   const result = spawnSync(command, args, {
-    env: process.env,
+    env: env ?? process.env,
     encoding: "utf8"
   });
   if (result.error) {
@@ -79,11 +84,16 @@ const printSummary = (
   );
 };
 
-const runSeries = (label: string, command: string, args: string[]): Result[] => {
+const runSeries = (
+  label: string,
+  command: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv
+): Result[] => {
   const results: Result[] = [];
   for (let i = 0; i < RUNS; i++) {
     const runLabel = `${label} run ${i + 1}`;
-    const result = runOnce(runLabel, command, args);
+    const result = runOnce(runLabel, command, args, env);
     if (i >= DISCARD) {
       results.push(result);
     }
@@ -92,10 +102,26 @@ const runSeries = (label: string, command: string, args: string[]): Result[] => 
 };
 
 const main = () => {
-  console.log('RUNNING BENCHMARK SCRIPTS');
-  const tensorResults = runSeries("Tensor", "npx", ["tsx", "scripts/bench-tensor.ts"]);
-  const torchResults = runSeries("PyTorch", "python3", ["scripts/bench-pytorch.py"]);
+  console.log("RUNNING BENCHMARK SCRIPTS");
+  const tensorResults = runSeries("Tensor", "npx", [
+    "tsx",
+    "scripts/bench-tensor.ts"
+  ]);
+  const wasmEnv = {
+    ...process.env,
+    TENSOR_WASM_MATMUL: "1"
+  };
+  const tensorWasmResults = runSeries(
+    "Tensor (WASM matmul)",
+    "npx",
+    ["tsx", "scripts/bench-tensor.ts"],
+    wasmEnv
+  );
+  const torchResults = runSeries("PyTorch", "python3", [
+    "scripts/bench-pytorch.py"
+  ]);
   printSummary("Benchmark", tensorResults, torchResults);
+  printSummary("Benchmark (WASM matmul)", tensorWasmResults, torchResults);
 };
 
 main();
