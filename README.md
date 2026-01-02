@@ -12,7 +12,7 @@ gonna keep going, just will never actually build anything big
 
 
 
-#### Benchmark Summary
+### Benchmark Summary
 
 Tensor forward avg:   49.99 ms
 
@@ -33,7 +33,7 @@ PyTorch backward avg: 11.51 ms
 **Delta backward:       -140.72 ms (-1223.1%)**
 
 
-#### Benchmark (WASM matmul) Summary
+### Benchmark (WASM matmul) Summary
 
 Tensor forward avg:   43.75 ms
 
