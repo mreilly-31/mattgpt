@@ -31,3 +31,24 @@ Tensor backward avg:  152.23 ms
 PyTorch backward avg: 11.51 ms
 
 **Delta backward:       -140.72 ms (-1223.1%)**
+
+
+#### Benchmark (WASM matmul) Summary
+
+Tensor forward avg:   43.75 ms
+
+PyTorch forward avg:  2.14 ms
+
+**Delta forward:        -41.61 ms (-1947.6%)**
+
+Tensor no-grad avg:   9.76 ms
+
+PyTorch no-grad avg:  0.97 ms
+
+**Delta no-grad:        -8.79 ms (-909.4%)**
+
+Tensor backward avg:  118.89 ms
+
+PyTorch backward avg: 11.50 ms
+
+**Delta backward:       -107.39 ms (-934.0%)**
