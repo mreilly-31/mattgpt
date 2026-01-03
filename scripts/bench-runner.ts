@@ -4,6 +4,7 @@ type Result = {
   forward: number;
   forwardNoGrad: number;
   backward: number;
+  softmax: number;
 };
 
 const RUNS = 10;
@@ -11,7 +12,7 @@ const DISCARD = 3;
 
 const parseResult = (output: string, label: string): Result => {
   const match = output.match(
-    /RESULT\s+forward_ms=([0-9.]+)\s+forward_nograd_ms=([0-9.]+)\s+backward_ms=([0-9.]+)/
+    /RESULT\s+forward_ms=([0-9.]+)\s+forward_nograd_ms=([0-9.]+)\s+backward_ms=([0-9.]+)\s+softmax_ms=([0-9.]+)/
   );
   if (!match) {
     throw new Error(`${label} output missing RESULT line`);
@@ -19,7 +20,8 @@ const parseResult = (output: string, label: string): Result => {
   return {
     forward: Number(match[1]),
     forwardNoGrad: Number(match[2]),
-    backward: Number(match[3])
+    backward: Number(match[3]),
+    softmax: Number(match[4])
   };
 };
 
@@ -55,16 +57,20 @@ const printSummary = (
   const tensorForward = summarize(tensor.map((r) => r.forward));
   const tensorForwardNoGrad = summarize(tensor.map((r) => r.forwardNoGrad));
   const tensorBackward = summarize(tensor.map((r) => r.backward));
+  const tensorSoftmax = summarize(tensor.map((r) => r.softmax));
   const torchForward = summarize(pytorch.map((r) => r.forward));
   const torchForwardNoGrad = summarize(pytorch.map((r) => r.forwardNoGrad));
   const torchBackward = summarize(pytorch.map((r) => r.backward));
+  const torchSoftmax = summarize(pytorch.map((r) => r.softmax));
 
   const deltaForward = torchForward - tensorForward;
   const deltaForwardNoGrad = torchForwardNoGrad - tensorForwardNoGrad;
   const deltaBackward = torchBackward - tensorBackward;
+  const deltaSoftmax = torchSoftmax - tensorSoftmax;
   const pctForward = (deltaForward / torchForward) * 100;
   const pctForwardNoGrad = (deltaForwardNoGrad / torchForwardNoGrad) * 100;
   const pctBackward = (deltaBackward / torchBackward) * 100;
+  const pctSoftmax = (deltaSoftmax / torchSoftmax) * 100;
 
   console.log(`\n== ${label} Summary ==`);
   console.log(`Tensor forward avg:   ${tensorForward.toFixed(2)} ms`);
@@ -81,6 +87,11 @@ const printSummary = (
   console.log(`PyTorch backward avg: ${torchBackward.toFixed(2)} ms`);
   console.log(
     `Delta backward:       ${deltaBackward.toFixed(2)} ms (${pctBackward.toFixed(1)}%)`
+  );
+  console.log(`Tensor softmax avg:   ${tensorSoftmax.toFixed(2)} ms`);
+  console.log(`PyTorch softmax avg:  ${torchSoftmax.toFixed(2)} ms`);
+  console.log(
+    `Delta softmax:        ${deltaSoftmax.toFixed(2)} ms (${pctSoftmax.toFixed(1)}%)`
   );
 };
 
@@ -103,25 +114,23 @@ const runSeries = (
 
 const main = () => {
   console.log("RUNNING BENCHMARK SCRIPTS");
-  const tensorResults = runSeries("Tensor", "npx", [
+  const tensorResults = runSeries("Tensor (JS)", "npx", [
     "tsx",
     "scripts/bench-tensor.ts"
-  ]);
-  const wasmEnv = {
+  ], {
     ...process.env,
-    TENSOR_WASM_MATMUL: "1"
-  };
+    TENSOR_WASM_DISABLE: "1"
+  });
   const tensorWasmResults = runSeries(
-    "Tensor (WASM matmul)",
+    "Tensor (WASM)",
     "npx",
-    ["tsx", "scripts/bench-tensor.ts"],
-    wasmEnv
+    ["tsx", "scripts/bench-tensor.ts"]
   );
   const torchResults = runSeries("PyTorch", "python3", [
     "scripts/bench-pytorch.py"
   ]);
-  printSummary("Benchmark", tensorResults, torchResults);
-  printSummary("Benchmark (WASM matmul)", tensorWasmResults, torchResults);
+  printSummary("Benchmark (JS)", tensorResults, torchResults);
+  printSummary("Benchmark (WASM)", tensorWasmResults, torchResults);
 };
 
 main();

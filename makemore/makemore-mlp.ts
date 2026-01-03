@@ -76,14 +76,14 @@ const valX = xDev;
 const valY = yDev;
 const shouldTrain = process.argv.includes("--train");
 const shouldSample = process.argv.some((arg) => arg.startsWith("--sample"));
-const shouldUseWasm = process.argv.includes("--wasm");
+const shouldDisableWasm = process.argv.includes("--no-wasm");
 const sampleArg = process.argv.find((arg) => arg.startsWith("--sample="));
 const parsedSampleCount = sampleArg ? Number(sampleArg.split("=")[1]) : NaN;
 const sampleCount = Number.isFinite(parsedSampleCount) ? parsedSampleCount : 5;
 const modelPath = "model.json";
 
-if (shouldUseWasm) {
-  process.env.TENSOR_WASM_MATMUL = "1";
+if (shouldDisableWasm) {
+  process.env.TENSOR_WASM_DISABLE = "1";
 }
 
 type TensorPayload = { shape: number[]; data: number[] };

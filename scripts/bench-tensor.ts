@@ -31,6 +31,11 @@ const forwardBackward = (): void => {
   out.backward();
 };
 
+const softmaxForward = (): void => {
+  const a = Tensor.fromArray(shapeA, dataA, false);
+  a.softmax(-1);
+};
+
 const timeOnce = (fn: () => void): number => {
   const start = now();
   fn();
@@ -40,7 +45,8 @@ const timeOnce = (fn: () => void): number => {
 const forwardMs = timeOnce(forward);
 const forwardNoGradMs = timeOnce(forwardNoGrad);
 const backwardMs = timeOnce(forwardBackward);
+const softmaxMs = timeOnce(softmaxForward);
 
 console.log(
-  `RESULT forward_ms=${forwardMs.toFixed(4)} forward_nograd_ms=${forwardNoGradMs.toFixed(4)} backward_ms=${backwardMs.toFixed(4)}`
+  `RESULT forward_ms=${forwardMs.toFixed(4)} forward_nograd_ms=${forwardNoGradMs.toFixed(4)} backward_ms=${backwardMs.toFixed(4)} softmax_ms=${softmaxMs.toFixed(4)}`
 );

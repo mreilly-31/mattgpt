@@ -1,5 +1,5 @@
 [package]
-name = "wasm-matmul"
+name = "wasm-rust"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,3 +8,6 @@ crate-type = ["cdylib"]
 
 [profile.release]
 opt-level = "s"
+
+[dependencies]
+libm = "0.2"

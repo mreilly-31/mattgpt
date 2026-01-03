@@ -16,6 +16,10 @@ def forward_no_grad():
     b = torch.randn(shape_b, device=device, requires_grad=False)
     return (a @ b).relu().sum()
 
+def softmax_forward():
+    a = torch.randn(shape_a, device=device, requires_grad=False)
+    return torch.softmax(a, dim=-1)
+
 
 def time_once(fn):
     t0 = time.time()
@@ -26,7 +30,8 @@ def time_once(fn):
 forward_ms = time_once(forward)
 forward_nograd_ms = time_once(forward_no_grad)
 backward_ms = time_once(lambda: forward().backward())
+softmax_ms = time_once(softmax_forward)
 
 print(
-    f"RESULT forward_ms={forward_ms:.4f} forward_nograd_ms={forward_nograd_ms:.4f} backward_ms={backward_ms:.4f}"
+    f"RESULT forward_ms={forward_ms:.4f} forward_nograd_ms={forward_nograd_ms:.4f} backward_ms={backward_ms:.4f} softmax_ms={softmax_ms:.4f}"
 )

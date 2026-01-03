@@ -34,7 +34,10 @@ export class Linear {
     this.bias = bias ? initBias(in_features, out_features) : null;
   }
 
-  forward(x: Tensor): Tensor {
+  forward(
+    x: Tensor,
+    activation: "none" | "relu" | "tanh" | "gelu" = "none"
+  ): Tensor {
     if (x.shape.length !== 2) {
       throw new Error("Linear.forward expects a 2D input tensor");
     }
@@ -44,8 +47,17 @@ export class Linear {
       );
     }
 
+    if (this.bias) {
+      if (activation === "gelu") {
+        return x.matmul(this.weights).add(this.bias).gelu();
+      }
+      return x.matmulBiasAct(this.weights, this.bias, activation);
+    }
     const out = x.matmul(this.weights);
-    return this.bias ? out.add(this.bias) : out;
+    if (activation === "relu") return out.relu();
+    if (activation === "tanh") return out.tanh();
+    if (activation === "gelu") return out.gelu();
+    return out;
   }
 
   parameters(): Tensor[] {
