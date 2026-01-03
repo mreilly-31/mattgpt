@@ -95,6 +95,47 @@ const printSummary = (
   );
 };
 
+const buildMarkdownSummary = (
+  label: string,
+  tensor: Result[],
+  pytorch: Result[]
+): string => {
+  const tensorForward = summarize(tensor.map((r) => r.forward));
+  const tensorForwardNoGrad = summarize(tensor.map((r) => r.forwardNoGrad));
+  const tensorBackward = summarize(tensor.map((r) => r.backward));
+  const tensorSoftmax = summarize(tensor.map((r) => r.softmax));
+  const torchForward = summarize(pytorch.map((r) => r.forward));
+  const torchForwardNoGrad = summarize(pytorch.map((r) => r.forwardNoGrad));
+  const torchBackward = summarize(pytorch.map((r) => r.backward));
+  const torchSoftmax = summarize(pytorch.map((r) => r.softmax));
+
+  const rows = [
+    ["forward", tensorForward, torchForward],
+    ["forward_nograd", tensorForwardNoGrad, torchForwardNoGrad],
+    ["backward", tensorBackward, torchBackward],
+    ["softmax", tensorSoftmax, torchSoftmax]
+  ];
+
+  const lines = [
+    `### ${label}`,
+    "",
+    "| metric | Tensor avg (ms) | PyTorch avg (ms) | Delta (ms) | Delta (%) |",
+    "| --- | ---: | ---: | ---: | ---: |"
+  ];
+
+  for (const [metric, tensorVal, torchVal] of rows) {
+    const delta = torchVal - tensorVal;
+    const pct = (delta / torchVal) * 100;
+    lines.push(
+      `| ${metric} | ${tensorVal.toFixed(2)} | ${torchVal.toFixed(
+        2
+      )} | ${delta.toFixed(2)} | ${pct.toFixed(1)}% |`
+    );
+  }
+
+  return lines.join("\n");
+};
+
 const runSeries = (
   label: string,
   command: string,
@@ -131,6 +172,13 @@ const main = () => {
   ]);
   printSummary("Benchmark (JS)", tensorResults, torchResults);
   printSummary("Benchmark (WASM)", tensorWasmResults, torchResults);
+
+  console.log("\nMARKDOWN SUMMARY\n");
+  console.log(buildMarkdownSummary("Benchmark (JS)", tensorResults, torchResults));
+  console.log("");
+  console.log(
+    buildMarkdownSummary("Benchmark (WASM)", tensorWasmResults, torchResults)
+  );
 };
 
 main();

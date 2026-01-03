@@ -12,43 +12,20 @@ gonna keep going, just will never actually build anything big
 
 
 
-### Benchmark Summary
+### Benchmark (JS)
 
-Tensor forward avg:   49.99 ms
+| metric | Tensor avg (ms) | PyTorch avg (ms) | Delta (ms) | Delta (%) |
+| --- | ---: | ---: | ---: | ---: |
+| forward | 50.13 | 2.44 | -47.69 | -1956.0% |
+| forward_nograd | 45.55 | 1.01 | -44.54 | -4428.2% |
+| backward | 154.02 | 11.70 | -142.33 | -1216.9% |
+| softmax | 5.90 | 0.52 | -5.38 | -1038.0% |
 
-PyTorch forward avg:  2.14 ms
+### Benchmark (WASM)
 
-**Delta forward:        -47.85 ms (-2233.3%)**
-
-Tensor no-grad avg:   45.73 ms
-
-PyTorch no-grad avg:  0.99 ms
-
-**Delta no-grad:        -44.74 ms (-4535.0%)**
-
-Tensor backward avg:  152.23 ms
-
-PyTorch backward avg: 11.51 ms
-
-**Delta backward:       -140.72 ms (-1223.1%)**
-
-
-### Benchmark (WASM matmul) Summary
-
-Tensor forward avg:   43.75 ms
-
-PyTorch forward avg:  2.14 ms
-
-**Delta forward:        -41.61 ms (-1947.6%)**
-
-Tensor no-grad avg:   9.76 ms
-
-PyTorch no-grad avg:  0.97 ms
-
-**Delta no-grad:        -8.79 ms (-909.4%)**
-
-Tensor backward avg:  118.89 ms
-
-PyTorch backward avg: 11.50 ms
-
-**Delta backward:       -107.39 ms (-934.0%)**
+| metric | Tensor avg (ms) | PyTorch avg (ms) | Delta (ms) | Delta (%) |
+| --- | ---: | ---: | ---: | ---: |
+| forward | 44.06 | 2.44 | -41.63 | -1707.2% |
+| forward_nograd | 9.51 | 1.01 | -8.51 | -845.8% |
+| backward | 105.39 | 11.70 | -93.70 | -801.1% |
+| softmax | 1.08 | 0.52 | -0.57 | -109.1% |
