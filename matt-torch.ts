@@ -1,4 +1,4 @@
-import { Tensor } from "./structures/Tensor";
+import { Tape, Tensor } from "./structures/Tensor";
 import { Value } from "./structures/Value";
 
 // super basic random sample algorithm, I'm sure its good enough
@@ -219,7 +219,8 @@ export const ones = (shape: number[], grad: boolean = true): Tensor => {
  */
 export const initWeights = (
   in_features: number,
-  out_features: number
+  out_features: number,
+  tape?: Tape
 ): Tensor => {
   const bound = Math.sqrt(1 / in_features);
   const size = in_features * out_features;
@@ -227,18 +228,22 @@ export const initWeights = (
   for (let i = 0; i < size; i++) {
     data[i] = randFloat(-bound, bound);
   }
-  return Tensor.fromArray([in_features, out_features], data);
+  return Tensor.fromArray([in_features, out_features], data, true, tape);
 };
 
 /**
  * Bias uniform in [-bound, bound] where bound = 1/sqrt(fan_in),
  * matching the typical PyTorch linear bias initialization idea.
  */
-export const initBias = (in_features: number, out_features: number): Tensor => {
+export const initBias = (
+  in_features: number,
+  out_features: number,
+  tape?: Tape
+): Tensor => {
   const bound = 1 / Math.sqrt(in_features);
   const data = new Array(out_features);
   for (let i = 0; i < out_features; i++) {
     data[i] = randFloat(-bound, bound);
   }
-  return Tensor.fromArray([out_features], data);
+  return Tensor.fromArray([out_features], data, true, tape);
 }

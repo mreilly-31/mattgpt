@@ -14,26 +14,26 @@
  * then scale the matrix by 1-p to maintain magnitude
  */
 
+import { ModelComponent } from "./ModelComponent";
 import { Tensor } from "./Tensor";
 
-export class Dropout {
+export class Dropout extends ModelComponent {
   p: number;
-  training: boolean;
 
   constructor(p = 0.5) {
+    super();
     if (p < 0 || p >= 1) {
       throw new Error("Dropout probability must be in [0, 1)");
     }
     this.p = p;
-    this.training = true;
   }
 
-  train(): void {
-    this.training = true;
+  train(): this {
+    return super.train();
   }
 
-  eval(): void {
-    this.training = false;
+  eval(): this {
+    return super.eval();
   }
 
   forward(x: Tensor): Tensor {
@@ -49,5 +49,9 @@ export class Dropout {
     }
     const mask = Tensor.fromArray(x.shape, maskData);
     return x.mul(mask);
+  }
+
+  parameters(): Tensor[] {
+    return [];
   }
 }

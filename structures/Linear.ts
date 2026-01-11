@@ -15,49 +15,60 @@
  * 
 * for all neurons, we get x @ W + b
  */
-import { Tensor } from "./Tensor";
+import { ModelComponent } from "./ModelComponent";
+import { Tape, Tensor } from "./Tensor";
 import { initBias, initWeights } from "../matt-torch";
 
-export class Linear {
+export class Linear extends ModelComponent {
   in_features: number;
   out_features: number;
   bias: Tensor | null;
   weights: Tensor;
 
-  constructor(in_features: number, out_features: number, bias = true) {
+  constructor(
+    in_features: number,
+    out_features: number,
+    bias = true,
+    tape?: Tape
+  ) {
+    super();
     if (in_features <= 0 || out_features <= 0) {
       throw new Error("in and out features must be greater than 0");
     }
     this.in_features = in_features;
     this.out_features = out_features;
-    this.weights = initWeights(in_features, out_features);
-    this.bias = bias ? initBias(in_features, out_features) : null;
+    this.weights = initWeights(in_features, out_features, tape);
+    this.bias = bias ? initBias(in_features, out_features, tape) : null;
   }
 
   forward(
     x: Tensor,
     activation: "none" | "relu" | "tanh" | "gelu" = "none"
   ): Tensor {
-    if (x.shape.length !== 2) {
-      throw new Error("Linear.forward expects a 2D input tensor");
+    if (x.shape.length < 2) {
+      throw new Error("Linear.forward expects at least a 2D input tensor");
     }
-    if (x.shape[1] !== this.in_features) {
+    const inDim = x.shape[x.shape.length - 1];
+    if (inDim !== this.in_features) {
       throw new Error(
-        `Linear.forward expects in_features=${this.in_features}, got ${x.shape[1]}`
+        `Linear.forward expects in_features=${this.in_features}, got ${inDim}`
       );
     }
 
-    if (this.bias) {
-      if (activation === "gelu") {
-        return x.matmul(this.weights).add(this.bias).gelu();
-      }
-      return x.matmulBiasAct(this.weights, this.bias, activation);
+    const batchSize = x.size / inDim;
+    const flat = x.view([batchSize, inDim]);
+    let out = this.bias
+      ? flat.matmulBiasAct(this.weights, this.bias, activation)
+      : flat.matmul(this.weights);
+
+    if (!this.bias) {
+      if (activation === "relu") out = out.relu();
+      if (activation === "tanh") out = out.tanh();
+      if (activation === "gelu") out = out.gelu();
     }
-    const out = x.matmul(this.weights);
-    if (activation === "relu") return out.relu();
-    if (activation === "tanh") return out.tanh();
-    if (activation === "gelu") return out.gelu();
-    return out;
+
+    const outShape = [...x.shape.slice(0, -1), this.out_features];
+    return out.view(outShape);
   }
 
   parameters(): Tensor[] {

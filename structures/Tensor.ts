@@ -1,20 +1,3 @@
-import {
-  getMatmulBackend,
-  layerNormWasm,
-  layerNormBackwardWasm,
-  logsoftmaxWasm,
-  logsoftmaxBackwardWasm,
-  geluWasm,
-  mlpFusedWasm,
-  matmulBackwardWasm,
-  matmulWasm,
-  reduceMaxWasm,
-  reduceMeanWasm,
-  reduceSumWasm,
-  softmaxWasm,
-  softmaxBackwardWasm
-} from "./wasm/wasm-math";
-
 type Shape = number[];
 
 type TapeNode = {
@@ -386,7 +369,7 @@ export class Tensor {
   matmulBiasAct(
     other: Tensor,
     bias: Tensor,
-    activation: "none" | "relu" | "tanh" = "none"
+    activation: "none" | "relu" | "tanh" | "gelu" = "none"
   ): Tensor {
     if (this.shape.length !== 2 || other.shape.length !== 2) {
       throw new Error("matmulBiasAct requires 2D tensors");
@@ -400,44 +383,13 @@ export class Tensor {
       throw new Error("matmulBiasAct requires matching dimensions");
     }
 
-    const tape = resolveTape(this, other) ?? resolveTape(this, bias);
-    const requiresGrad =
-      this.requiresGrad || other.requiresGrad || bias.requiresGrad;
-
-    const wasmEnabled =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_FUSED_MLP !== "0";
-    const backend = wasmEnabled ? getMatmulBackend() : null;
-    const canWasm =
-      backend &&
-      backend.exports.mlp_fused &&
-      !requiresGrad;
-
-    if (canWasm) {
-      const activationCode =
-        activation === "relu" ? 1 : activation === "tanh" ? 2 : 0;
-      const outData = mlpFusedWasm(
-        backend,
-        this.data,
-        other.data,
-        bias.data,
-        m,
-        k,
-        n,
-        activationCode
-      );
-      return new Tensor([m, n], {
-        data: outData,
-        requiresGrad: false,
-        reuseData: true
-      });
-    }
-
     let out = this.matmul(other).add(bias);
     if (activation === "relu") {
       out = out.relu();
     } else if (activation === "tanh") {
       out = out.tanh();
+    } else if (activation === "gelu") {
+      out = out.gelu();
     }
     return out;
   }
@@ -501,34 +453,12 @@ export class Tensor {
       tape
     });
 
-    const wasmEnabled =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_REDUCE !== "0";
-    const backend = wasmEnabled ? getMatmulBackend() : null;
-    const axisIsLast = axes.length === 1 && axes[0] === this.shape.length - 1;
-    const canWasm =
-      backend &&
-      backend.exports.reduce_sum &&
-      axisIsLast &&
-      (this.shape.length === 1 || this.shape.length === 2);
-
-    if (canWasm) {
-      const rows = this.shape.length === 1 ? 1 : this.shape[0];
-      const cols = this.shape.length === 1 ? this.shape[0] : this.shape[1];
-      const reduced = reduceSumWasm(backend, this.data, rows, cols);
-      if (outShape.length === 0) {
-        out.data[0] = reduced[0];
-      } else {
-        out.data.set(reduced);
-      }
-    } else {
-      for (let i = 0; i < this.size; i++) {
-        const coords = unflattenIndex(i, this.shape, this.strides);
-        const outCoords = coords.filter((_, idx) => !axesSet.has(idx));
-        const outIndex =
-          outCoords.length === 0 ? 0 : flattenIndex(outCoords, out.strides);
-        out.data[outIndex] += this.data[i];
-      }
+    for (let i = 0; i < this.size; i++) {
+      const coords = unflattenIndex(i, this.shape, this.strides);
+      const outCoords = coords.filter((_, idx) => !axesSet.has(idx));
+      const outIndex =
+        outCoords.length === 0 ? 0 : flattenIndex(outCoords, out.strides);
+      out.data[outIndex] += this.data[i];
     }
 
     if (this.requiresGrad && tape) {
@@ -554,49 +484,6 @@ export class Tensor {
     }
     const axes = normalizeAxes(axis, this.shape.length);
     const count = axes.reduce((acc, dim) => acc * this.shape[dim], 1);
-    const wasmEnabled =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_REDUCE !== "0";
-    const backend = wasmEnabled ? getMatmulBackend() : null;
-    const axisIsLast = axes.length === 1 && axes[0] === this.shape.length - 1;
-    const canWasm =
-      backend &&
-      backend.exports.reduce_mean &&
-      axisIsLast &&
-      (this.shape.length === 1 || this.shape.length === 2);
-
-    if (canWasm) {
-      const rows = this.shape.length === 1 ? 1 : this.shape[0];
-      const cols = this.shape.length === 1 ? this.shape[0] : this.shape[1];
-      const reduced = reduceMeanWasm(backend, this.data, rows, cols);
-      const outShape = this.shape.filter((_, idx) => idx !== axes[0]);
-      const out = new Tensor(outShape, {
-        requiresGrad: this.requiresGrad,
-        tape: resolveTape(this)
-      });
-      if (outShape.length === 0) {
-        out.data[0] = reduced[0];
-      } else {
-        out.data.set(reduced);
-      }
-
-      if (this.requiresGrad && out.tape) {
-        out.tape.add({
-          backward: () => {
-            const scale = 1 / count;
-            for (let i = 0; i < this.size; i++) {
-              const coords = unflattenIndex(i, this.shape, this.strides);
-              const outCoords = coords.filter((_, idx) => idx !== axes[0]);
-              const outIndex =
-                outCoords.length === 0 ? 0 : flattenIndex(outCoords, out.strides);
-              this.grad[i] += out.grad[outIndex] * scale;
-            }
-          }
-        });
-      }
-      return out;
-    }
-
     return this.sum(axes).mulScalar(1 / count);
   }
 
@@ -644,35 +531,13 @@ export class Tensor {
       out.data[i] = -Infinity;
     }
 
-    const wasmEnabled =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_REDUCE !== "0";
-    const backend = wasmEnabled ? getMatmulBackend() : null;
-    const axisIsLast = axes.length === 1 && axes[0] === this.shape.length - 1;
-    const canWasm =
-      backend &&
-      backend.exports.reduce_max &&
-      axisIsLast &&
-      (this.shape.length === 1 || this.shape.length === 2);
-
-    if (canWasm) {
-      const rows = this.shape.length === 1 ? 1 : this.shape[0];
-      const cols = this.shape.length === 1 ? this.shape[0] : this.shape[1];
-      const reduced = reduceMaxWasm(backend, this.data, rows, cols);
-      if (outShape.length === 0) {
-        out.data[0] = reduced[0];
-      } else {
-        out.data.set(reduced);
-      }
-    } else {
-      for (let i = 0; i < this.size; i++) {
-        const coords = unflattenIndex(i, this.shape, this.strides);
-        const outCoords = coords.filter((_, idx) => !axesSet.has(idx));
-        const outIndex =
-          outCoords.length === 0 ? 0 : flattenIndex(outCoords, out.strides);
-        if (this.data[i] > out.data[outIndex]) {
-          out.data[outIndex] = this.data[i];
-        }
+    for (let i = 0; i < this.size; i++) {
+      const coords = unflattenIndex(i, this.shape, this.strides);
+      const outCoords = coords.filter((_, idx) => !axesSet.has(idx));
+      const outIndex =
+        outCoords.length === 0 ? 0 : flattenIndex(outCoords, out.strides);
+      if (this.data[i] > out.data[outIndex]) {
+        out.data[outIndex] = this.data[i];
       }
     }
 
@@ -714,100 +579,6 @@ export class Tensor {
     }
 
     const featureDim = this.shape[this.shape.length - 1];
-    const rows = this.size / featureDim;
-
-    const needsGrad =
-      this.requiresGrad || gamma?.requiresGrad || beta?.requiresGrad;
-    const wasmEnabled =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_LAYERNORM !== "0";
-    const backend = wasmEnabled ? getMatmulBackend() : null;
-    const forwardWasm = backend && backend.exports.layernorm;
-    const backwardWasm =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_BACKWARD !== "0" &&
-      backend &&
-      backend.exports.layernorm_backward;
-
-    if (!needsGrad && forwardWasm) {
-      const gammaData = gamma
-        ? gamma.data
-        : new Float32Array(featureDim).fill(1);
-      const betaData = beta
-        ? beta.data
-        : new Float32Array(featureDim).fill(0);
-      const result = layerNormWasm(
-        backend!,
-        this.data,
-        gammaData,
-        betaData,
-        rows,
-        featureDim,
-        eps
-      );
-      return new Tensor(this.shape, {
-        data: result,
-        requiresGrad: false,
-        reuseData: true
-      });
-    }
-
-    if (needsGrad && forwardWasm && backwardWasm) {
-      const tape = resolveTape(this, gamma) ?? resolveTape(this, beta);
-      const out = new Tensor(this.shape, {
-        requiresGrad: true,
-        tape
-      });
-      const gammaData = gamma
-        ? gamma.data
-        : new Float32Array(featureDim).fill(1);
-      const betaData = beta
-        ? beta.data
-        : new Float32Array(featureDim).fill(0);
-      const result = layerNormWasm(
-        backend!,
-        this.data,
-        gammaData,
-        betaData,
-        rows,
-        featureDim,
-        eps
-      );
-      out.data.set(result);
-
-      if (tape) {
-        tape.add({
-          backward: () => {
-            const grads = layerNormBackwardWasm(
-              backend!,
-              this.data,
-              gammaData,
-              out.grad,
-              rows,
-              featureDim,
-              eps
-            );
-            if (this.requiresGrad) {
-              for (let i = 0; i < this.grad.length; i++) {
-                this.grad[i] += grads.gradInput[i];
-              }
-            }
-            if (gamma?.requiresGrad) {
-              for (let i = 0; i < gamma.grad.length; i++) {
-                gamma.grad[i] += grads.gradGamma[i];
-              }
-            }
-            if (beta?.requiresGrad) {
-              for (let i = 0; i < beta.grad.length; i++) {
-                beta.grad[i] += grads.gradBeta[i];
-              }
-            }
-          }
-        });
-      }
-      return out;
-    }
-
     const mean = this.mean(this.shape.length - 1);
     const meanExpanded = mean.view([...mean.shape, 1]);
     const centered = this.sub(meanExpanded);
@@ -891,29 +662,16 @@ export class Tensor {
   // https://arxiv.org/pdf/1606.08415v3
   gelu(): Tensor {
     const tape = resolveTape(this);
-    const wasmEnabled =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_GELU !== "0";
-    const backend = wasmEnabled ? getMatmulBackend() : null;
-    const canWasm = backend && backend.exports.gelu && !this.requiresGrad;
-    const out = canWasm
-      ? new Tensor(this.shape, {
-          data: geluWasm(backend!, this.data),
-          requiresGrad: false,
-          reuseData: true
-        })
-      : new Tensor(this.shape, {
-          requiresGrad: this.requiresGrad,
-          tape
-        });
-    if (!canWasm) {
-      const a = Math.sqrt(2 / Math.PI);
-      for (let i = 0; i < this.size; i++) {
-        const x = this.data[i];
-        const x3 = x * x * x;
-        const inner = a * (x + 0.044715 * x3);
-        out.data[i] = 0.5 * x * (1 + Math.tanh(inner));
-      }
+    const out = new Tensor(this.shape, {
+      requiresGrad: this.requiresGrad,
+      tape
+    });
+    const a = Math.sqrt(2 / Math.PI);
+    for (let i = 0; i < this.size; i++) {
+      const x = this.data[i];
+      const x3 = x * x * x;
+      const inner = a * (x + 0.044715 * x3);
+      out.data[i] = 0.5 * x * (1 + Math.tanh(inner));
     }
     if (this.requiresGrad && tape) {
       tape.add({
@@ -990,94 +748,14 @@ export class Tensor {
       this.shape.length
     );
     const tape = resolveTape(this);
-    const wasmEnabled =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_SOFTMAX !== "0";
-    const backend = wasmEnabled ? getMatmulBackend() : null;
-    const canWasm =
-      backend &&
-      axis === this.shape.length - 1 &&
-      (this.shape.length === 2 || this.shape.length === 1);
-    const out = canWasm
-      ? new Tensor(this.shape, {
-          data: softmaxWasm(
-            backend!,
-            this.data,
-            this.shape.length === 1 ? 1 : this.shape[0],
-            this.shape.length === 1 ? this.shape[0] : this.shape[1]
-          ),
-          requiresGrad: this.requiresGrad,
-          tape,
-          reuseData: true
-        })
-      : new Tensor(this.shape, {
-          requiresGrad: this.requiresGrad,
-          tape
-        });
+    const out = new Tensor(this.shape, {
+      requiresGrad: this.requiresGrad,
+      tape
+    });
     const axisSize = this.shape[axis];
     const baseShape = this.shape.filter((_, idx) => idx !== axis);
     const baseStrides = buildStrides(baseShape);
     const baseSize = computeSize(baseShape);
-
-    if (canWasm) {
-      if (this.requiresGrad && tape) {
-        tape.add({
-          backward: () => {
-            const backwardWasmEnabled =
-              process.env.TENSOR_WASM_DISABLE !== "1" &&
-              process.env.TENSOR_WASM_BACKWARD !== "0";
-            const backend = backwardWasmEnabled ? getMatmulBackend() : null;
-            if (backend && backend.exports.softmax_backward) {
-              const rows = this.shape.length === 1 ? 1 : this.shape[0];
-              const cols = this.shape.length === 1 ? this.shape[0] : this.shape[1];
-              const gradInput = softmaxBackwardWasm(
-                backend,
-                out.data,
-                out.grad,
-                rows,
-                cols
-              );
-              for (let i = 0; i < this.grad.length; i++) {
-                this.grad[i] += gradInput[i];
-              }
-              return;
-            }
-
-            for (let baseIndex = 0; baseIndex < baseSize; baseIndex++) {
-              const baseCoords = unflattenIndex(baseIndex, baseShape, baseStrides);
-              let dot = 0;
-              for (let axisVal = 0; axisVal < axisSize; axisVal++) {
-                const coords = new Array(this.shape.length);
-                let cursor = 0;
-                for (let idx = 0; idx < this.shape.length; idx++) {
-                  if (idx === axis) {
-                    coords[idx] = axisVal;
-                  } else {
-                    coords[idx] = baseCoords[cursor++];
-                  }
-                }
-                const index = flattenIndex(coords, this.strides);
-                dot += out.grad[index] * out.data[index];
-              }
-              for (let axisVal = 0; axisVal < axisSize; axisVal++) {
-                const coords = new Array(this.shape.length);
-                let cursor = 0;
-                for (let idx = 0; idx < this.shape.length; idx++) {
-                  if (idx === axis) {
-                    coords[idx] = axisVal;
-                  } else {
-                    coords[idx] = baseCoords[cursor++];
-                  }
-                }
-                const index = flattenIndex(coords, this.strides);
-                this.grad[index] += out.data[index] * (out.grad[index] - dot);
-              }
-            }
-          }
-        });
-      }
-      return out;
-    }
 
     for (let baseIndex = 0; baseIndex < baseSize; baseIndex++) {
       const baseCoords = unflattenIndex(baseIndex, baseShape, baseStrides);
@@ -1178,95 +856,14 @@ export class Tensor {
       this.shape.length
     );
     const tape = resolveTape(this);
-    const wasmEnabled =
-      process.env.TENSOR_WASM_DISABLE !== "1" &&
-      process.env.TENSOR_WASM_LOGSOFTMAX !== "0";
-    const backend = wasmEnabled ? getMatmulBackend() : null;
-    const canWasm =
-      backend &&
-      axis === this.shape.length - 1 &&
-      (this.shape.length === 2 || this.shape.length === 1);
-    const out = canWasm
-      ? new Tensor(this.shape, {
-          data: logsoftmaxWasm(
-            backend!,
-            this.data,
-            this.shape.length === 1 ? 1 : this.shape[0],
-            this.shape.length === 1 ? this.shape[0] : this.shape[1]
-          ),
-          requiresGrad: this.requiresGrad,
-          tape,
-          reuseData: true
-        })
-      : new Tensor(this.shape, {
-          requiresGrad: this.requiresGrad,
-          tape
-        });
+    const out = new Tensor(this.shape, {
+      requiresGrad: this.requiresGrad,
+      tape
+    });
     const axisSize = this.shape[axis];
     const baseShape = this.shape.filter((_, idx) => idx !== axis);
     const baseStrides = buildStrides(baseShape);
     const baseSize = computeSize(baseShape);
-
-    if (canWasm) {
-      if (this.requiresGrad && tape) {
-        tape.add({
-          backward: () => {
-            const backwardWasmEnabled =
-              process.env.TENSOR_WASM_DISABLE !== "1" &&
-              process.env.TENSOR_WASM_BACKWARD !== "0";
-            const backend = backwardWasmEnabled ? getMatmulBackend() : null;
-            if (backend && backend.exports.logsoftmax_backward) {
-              const rows = this.shape.length === 1 ? 1 : this.shape[0];
-              const cols = this.shape.length === 1 ? this.shape[0] : this.shape[1];
-              const gradInput = logsoftmaxBackwardWasm(
-                backend,
-                out.data,
-                out.grad,
-                rows,
-                cols
-              );
-              for (let i = 0; i < this.grad.length; i++) {
-                this.grad[i] += gradInput[i];
-              }
-              return;
-            }
-
-            for (let baseIndex = 0; baseIndex < baseSize; baseIndex++) {
-              const baseCoords = unflattenIndex(baseIndex, baseShape, baseStrides);
-              let sumGrad = 0;
-              for (let axisVal = 0; axisVal < axisSize; axisVal++) {
-                const coords = new Array(this.shape.length);
-                let cursor = 0;
-                for (let idx = 0; idx < this.shape.length; idx++) {
-                  if (idx === axis) {
-                    coords[idx] = axisVal;
-                  } else {
-                    coords[idx] = baseCoords[cursor++];
-                  }
-                }
-                const index = flattenIndex(coords, this.strides);
-                sumGrad += out.grad[index];
-              }
-              for (let axisVal = 0; axisVal < axisSize; axisVal++) {
-                const coords = new Array(this.shape.length);
-                let cursor = 0;
-                for (let idx = 0; idx < this.shape.length; idx++) {
-                  if (idx === axis) {
-                    coords[idx] = axisVal;
-                  } else {
-                    coords[idx] = baseCoords[cursor++];
-                  }
-                }
-                const index = flattenIndex(coords, this.strides);
-                const softmaxVal = Math.exp(out.data[index]);
-                this.grad[index] += out.grad[index] - softmaxVal * sumGrad;
-              }
-            }
-          }
-        });
-      }
-      return out;
-    }
 
     for (let baseIndex = 0; baseIndex < baseSize; baseIndex++) {
       const baseCoords = unflattenIndex(baseIndex, baseShape, baseStrides);
@@ -1358,37 +955,71 @@ export class Tensor {
   }
 
   matmul(other: Tensor): Tensor {
-    if (this.shape.length !== 2 || other.shape.length !== 2) {
-      throw new Error("matmul requires 2D tensors");
+    if (this.shape.length < 2 || other.shape.length < 2) {
+      throw new Error("matmul requires tensors with at least 2 dimensions");
     }
-    const [m, k] = this.shape;
-    const [kOther, n] = other.shape;
+    const batchShape = this.shape.slice(0, -2);
+    const otherBatchShape = other.shape.slice(0, -2);
+    if (batchShape.length !== otherBatchShape.length) {
+      throw new Error("matmul requires matching batch ranks");
+    }
+    for (let i = 0; i < batchShape.length; i++) {
+      if (batchShape[i] !== otherBatchShape[i]) {
+        throw new Error("matmul requires matching batch dimensions");
+      }
+    }
+
+    const m = this.shape[this.shape.length - 2];
+    const k = this.shape[this.shape.length - 1];
+    const kOther = other.shape[other.shape.length - 2];
+    const n = other.shape[other.shape.length - 1];
     if (k !== kOther) {
       throw new Error("matmul requires inner dimensions to match");
     }
 
     const tape = resolveTape(this, other);
     const requiresGrad = this.requiresGrad || other.requiresGrad;
-    const backend = getMatmulBackend();
-    const out = backend
-      ? new Tensor([m, n], {
-          data: matmulWasm(backend, this.data, other.data, m, k, n),
-          requiresGrad,
-          tape,
-          reuseData: true
-        })
-      : new Tensor([m, n], { requiresGrad, tape });
+    const outShape = [...batchShape, m, n];
+    const out = new Tensor(outShape, { requiresGrad, tape });
+    const batchSize = batchShape.length
+      ? batchShape.reduce((acc, cur) => acc * cur, 1)
+      : 1;
+    const batchStrides = batchShape.length ? buildStrides(batchShape) : [];
 
-    if (!backend) {
+    for (let batchIndex = 0; batchIndex < batchSize; batchIndex++) {
+      const batchCoords =
+        batchShape.length === 0
+          ? []
+          : unflattenIndex(batchIndex, batchShape, batchStrides);
+      const baseA = batchCoords.length
+        ? flattenIndex(batchCoords, this.strides)
+        : 0;
+      const baseB = batchCoords.length
+        ? flattenIndex(batchCoords, other.strides)
+        : 0;
+      const baseOut = batchCoords.length
+        ? flattenIndex(batchCoords, out.strides)
+        : 0;
+
       for (let i = 0; i < m; i++) {
         for (let j = 0; j < n; j++) {
           let acc = 0;
           for (let p = 0; p < k; p++) {
-            const aIndex = i * this.strides[0] + p * this.strides[1];
-            const bIndex = p * other.strides[0] + j * other.strides[1];
+            const aIndex =
+              baseA +
+              i * this.strides[this.strides.length - 2] +
+              p * this.strides[this.strides.length - 1];
+            const bIndex =
+              baseB +
+              p * other.strides[other.strides.length - 2] +
+              j * other.strides[other.strides.length - 1];
             acc += this.data[aIndex] * other.data[bIndex];
           }
-          out.data[i * out.strides[0] + j * out.strides[1]] = acc;
+          const outIndex =
+            baseOut +
+            i * out.strides[out.strides.length - 2] +
+            j * out.strides[out.strides.length - 1];
+          out.data[outIndex] = acc;
         }
       }
     }
@@ -1396,66 +1027,71 @@ export class Tensor {
     if (requiresGrad && tape) {
       tape.add({
         backward: () => {
-          const backwardWasmEnabled =
-            process.env.TENSOR_WASM_DISABLE !== "1" &&
-            process.env.TENSOR_WASM_BACKWARD !== "0";
-          const backwardBackend = backwardWasmEnabled ? getMatmulBackend() : null;
+          const batchSize = batchShape.length
+            ? batchShape.reduce((acc, cur) => acc * cur, 1)
+            : 1;
+          const batchStrides = batchShape.length ? buildStrides(batchShape) : [];
 
-          if (backwardBackend && backwardBackend.exports.matmul_backward) {
-            const grads = matmulBackwardWasm(
-              backwardBackend,
-              this.data,
-              other.data,
-              out.grad,
-              m,
-              k,
-              n
-            );
+          for (let batchIndex = 0; batchIndex < batchSize; batchIndex++) {
+            const batchCoords =
+              batchShape.length === 0
+                ? []
+                : unflattenIndex(batchIndex, batchShape, batchStrides);
+            const baseA = batchCoords.length
+              ? flattenIndex(batchCoords, this.strides)
+              : 0;
+            const baseB = batchCoords.length
+              ? flattenIndex(batchCoords, other.strides)
+              : 0;
+            const baseOut = batchCoords.length
+              ? flattenIndex(batchCoords, out.strides)
+              : 0;
 
             if (this.requiresGrad) {
-              for (let i = 0; i < this.grad.length; i++) {
-                this.grad[i] += grads.gradA[i];
+              for (let i = 0; i < m; i++) {
+                for (let p = 0; p < k; p++) {
+                  let acc = 0;
+                  for (let j = 0; j < n; j++) {
+                    const outIndex =
+                      baseOut +
+                      i * out.strides[out.strides.length - 2] +
+                      j * out.strides[out.strides.length - 1];
+                    const bIndex =
+                      baseB +
+                      p * other.strides[other.strides.length - 2] +
+                      j * other.strides[other.strides.length - 1];
+                    acc += out.grad[outIndex] * other.data[bIndex];
+                  }
+                  const aIndex =
+                    baseA +
+                    i * this.strides[this.strides.length - 2] +
+                    p * this.strides[this.strides.length - 1];
+                  this.grad[aIndex] += acc;
+                }
               }
             }
 
             if (other.requiresGrad) {
-              for (let i = 0; i < other.grad.length; i++) {
-                other.grad[i] += grads.gradB[i];
-              }
-            }
-            return;
-          }
-
-          if (this.requiresGrad) {
-            for (let i = 0; i < m; i++) {
               for (let p = 0; p < k; p++) {
-                let acc = 0;
                 for (let j = 0; j < n; j++) {
-                  const outIndex =
-                    i * out.strides[0] + j * out.strides[1];
+                  let acc = 0;
+                  for (let i = 0; i < m; i++) {
+                    const outIndex =
+                      baseOut +
+                      i * out.strides[out.strides.length - 2] +
+                      j * out.strides[out.strides.length - 1];
+                    const aIndex =
+                      baseA +
+                      i * this.strides[this.strides.length - 2] +
+                      p * this.strides[this.strides.length - 1];
+                    acc += this.data[aIndex] * out.grad[outIndex];
+                  }
                   const bIndex =
-                    p * other.strides[0] + j * other.strides[1];
-                  acc += out.grad[outIndex] * other.data[bIndex];
+                    baseB +
+                    p * other.strides[other.strides.length - 2] +
+                    j * other.strides[other.strides.length - 1];
+                  other.grad[bIndex] += acc;
                 }
-                const aIndex = i * this.strides[0] + p * this.strides[1];
-                this.grad[aIndex] += acc;
-              }
-            }
-          }
-
-          if (other.requiresGrad) {
-            for (let p = 0; p < k; p++) {
-              for (let j = 0; j < n; j++) {
-                let acc = 0;
-                for (let i = 0; i < m; i++) {
-                  const outIndex =
-                    i * out.strides[0] + j * out.strides[1];
-                  const aIndex = i * this.strides[0] + p * this.strides[1];
-                  acc += this.data[aIndex] * out.grad[outIndex];
-                }
-                const bIndex =
-                  p * other.strides[0] + j * other.strides[1];
-                other.grad[bIndex] += acc;
               }
             }
           }

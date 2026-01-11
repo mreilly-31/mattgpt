@@ -1,7 +1,8 @@
 import { ninf, ones, triu } from "../matt-torch";
 import { Dropout } from "./Dropout";
 import { Linear } from "./Linear";
-import { Tensor } from "./Tensor";
+import { ModelComponent } from "./ModelComponent";
+import { Tape, Tensor } from "./Tensor";
 
 interface MultiHeadAttentionConfig {
   dims_in: number;
@@ -10,9 +11,10 @@ interface MultiHeadAttentionConfig {
   dropout: number;
   num_heads: number;
   training: boolean;
+  tape?: Tape;
 }
 
-export class MultiHeadAttention {
+export class MultiHeadAttention extends ModelComponent{
   dims_in: number;
   dims_out: number;
   context_length: number;
@@ -27,6 +29,7 @@ export class MultiHeadAttention {
   training: boolean;
 
   constructor(params: MultiHeadAttentionConfig) {
+    super();
     this.dims_in = params.dims_in;
     this.dims_out = params.dims_out;
     this.context_length = params.context_length;
@@ -36,12 +39,36 @@ export class MultiHeadAttention {
       this.dropout.train();
     }
     this.num_heads = params.num_heads;
+    if (this.dims_out % this.num_heads !== 0) {
+      throw new Error("dims_out must be divisible by num_heads");
+    }
     this.head_dim = Math.trunc(params.dims_out / params.num_heads);
-    this.W_query = new Linear(this.dims_in, this.dims_out);
-    this.W_key = new Linear(this.dims_in, this.dims_out);
-    this.W_value = new Linear(this.dims_in, this.dims_out);
-    this.out_proj = new Linear(this.dims_out, this.dims_out);
+    const tape = params.tape;
+    this.W_query = new Linear(this.dims_in, this.dims_out, true, tape);
+    this.W_key = new Linear(this.dims_in, this.dims_out, true, tape);
+    this.W_value = new Linear(this.dims_in, this.dims_out, true, tape);
+    this.out_proj = new Linear(this.dims_out, this.dims_out, true, tape);
     this.mask = triu(ones([this.context_length, this.context_length], false), 1, false);
+  }
+
+  train(): this {
+    this.training = true;
+    this.dropout.train();
+    this.W_query.train();
+    this.W_key.train();
+    this.W_value.train();
+    this.out_proj.train();
+    return this;
+  }
+
+  eval(): this {
+    this.training = false;
+    this.dropout.eval();
+    this.W_query.eval();
+    this.W_key.eval();
+    this.W_value.eval();
+    this.out_proj.eval();
+    return this;
   }
 
   forward(x: Tensor) {
@@ -76,7 +103,9 @@ export class MultiHeadAttention {
     let mask_fill = this.mask.slice(0, 0, num_tokens).slice(1, 0, num_tokens);
     attn_scores = attn_scores.add(mask_fill.mulScalar(ninf));
 
-    let attn_weights = attn_scores.divScalar(keys.shape.slice(-1)[0]**0.5).softmax(-1);
+    let attn_weights = attn_scores
+      .divScalar(this.head_dim ** 0.5)
+      .softmax(-1);
     attn_weights = this.dropout.forward(attn_weights);
 
     let context_vector = attn_weights.matmul(values).transpose(1, 2);
@@ -84,5 +113,14 @@ export class MultiHeadAttention {
     context_vector = this.out_proj.forward(context_vector);
 
     return context_vector;
+  }
+
+  parameters(): Tensor[] {
+    return [
+      ...this.W_query.parameters(),
+      ...this.W_key.parameters(),
+      ...this.W_value.parameters(),
+      ...this.out_proj.parameters()
+    ];
   }
 }

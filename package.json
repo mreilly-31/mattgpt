@@ -9,7 +9,6 @@
   "main": "index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path structures/wasm-rust/Cargo.toml && cp structures/wasm-rust/target/wasm32-unknown-unknown/release/wasm_matmul.wasm structures/wasm/wasm-math.wasm",
     "bench": "npx tsx scripts/bench-runner.ts"
   },
   "author": "matt.reilly@playbookexp.com",

@@ -1,7 +1,7 @@
 import time
 import torch
 
-device = "cpu"  # set to "mps" or "cuda" if desired
+device = "mps"  # set to "mps" or "cuda" if desired
 shape_a = (256, 256)
 shape_b = (256, 256)
 

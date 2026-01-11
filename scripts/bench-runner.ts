@@ -155,30 +155,17 @@ const runSeries = (
 
 const main = () => {
   console.log("RUNNING BENCHMARK SCRIPTS");
-  const tensorResults = runSeries("Tensor (JS)", "npx", [
+  const tensorResults = runSeries("Tensor (TS)", "npx", [
     "tsx",
     "scripts/bench-tensor.ts"
-  ], {
-    ...process.env,
-    TENSOR_WASM_DISABLE: "1"
-  });
-  const tensorWasmResults = runSeries(
-    "Tensor (WASM)",
-    "npx",
-    ["tsx", "scripts/bench-tensor.ts"]
-  );
+  ]);
   const torchResults = runSeries("PyTorch", "python3", [
     "scripts/bench-pytorch.py"
   ]);
-  printSummary("Benchmark (JS)", tensorResults, torchResults);
-  printSummary("Benchmark (WASM)", tensorWasmResults, torchResults);
+  printSummary("Benchmark (TS)", tensorResults, torchResults);
 
   console.log("\nMARKDOWN SUMMARY\n");
-  console.log(buildMarkdownSummary("Benchmark (JS)", tensorResults, torchResults));
-  console.log("");
-  console.log(
-    buildMarkdownSummary("Benchmark (WASM)", tensorWasmResults, torchResults)
-  );
+  console.log(buildMarkdownSummary("Benchmark (TS)", tensorResults, torchResults));
 };
 
 main();
